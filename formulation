@@ -1,0 +1,30 @@
+# Game formulation
+
+## v1: 360 degree vision, adjacent catch, no sound
+
+A partially observable stochastic game (POSG) is described by:
+- the agents
+- the state space S
+- each agent's action set A_i
+- the transition function T (how the state changes)
+- each agent's reward R_i
+- each agent's observation space and observation function O_i
+- the discount factor and when the game ends
+
+### Agents
+### State
+### Actions
+### Transitions
+### Rewards
+### Observations
+### End of round and discount
+
+### Thinking questions
+- Markov property:
+- Reward exploits:
+- Team structure:
+
+### Prediction
+
+## Changelog
+(each new feature gets a section here: what changed in which piece, and why)
