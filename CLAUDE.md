@@ -46,7 +46,7 @@ agents playing in a 3D world. The goal can grow later.
 
 Roadmap:
 1. v1: grid world (done, see results)
-2. **v2: continuous space with cone vision (built on branch `v2-continuous`, first 2M run done, see results)**
+2. **v2: continuous space with cone vision (built on branch `v2-continuous`, v2.1 is current, see results)**
 3. Walk vs run with sound (running is fast but makes noise; sound blocked by walls)
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
@@ -133,6 +133,18 @@ python evaluate.py runs/<run>/checkpoints/latest.pt
   on the tiny map a seeker that searches finds you almost anywhere; one-way sight means they often get caught from
   behind by a seeker they never saw. Next step, one change: a longer run (5M steps) to see whether hiders start
   learning once the seekers stop changing so fast.
+
+**2v1, tiny map, v2.1: seen reward 0.05 -> 0.2 (`runs/v2.1_tiny_2v1_20261020_205504`, 2M steps, 28 min):**
+- Seekers got much better: 96% against random hiders (v2: 65%), 67% against the fleeing bot (v2: 21%, chaser bots 79%),
+  self-play 86% (v2: 41%).
+- The spinning is gone. With a hider in sight they now walk forward 74% of the time (v2: 0%) and keep it in view
+  the next step 63% of the time (v2: 49%). Typical turn while chasing 15 degrees (v2: 29).
+- New quirk: while searching (no hider in sight) seekers mostly walk **backwards** (75% of all moves) while turning
+  slowly left (-10 degrees, 69%). Backpedalling costs nothing because every direction has the same speed. Idea for later
+  (one change): make back and strafe slower than forward, as in most FPS games.
+- Hiders still not learning: the chaser bot catches them 91% (random hider 88%), entropy stays near random (3.3).
+  The bigger hider signal did not fix that on its own; with seekers now winning 86% of self-play, hiders are mostly losing.
+- Next agreed step: team spotting (enemies a teammate sees show up in my enemy slots, shared "last seen enemy" memory).
 
 **Bugs and lessons found along the way:**
 - Minibatch NaN crash: a leftover minibatch of size 1 made the advantage standard deviation NaN.

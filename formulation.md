@@ -215,3 +215,7 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   21% against the fleeing bot, random seekers 4%) and split up to search. Hiders did not: the chaser bot catches them 91%
   of the time, the same as a random hider (88%). Self-play seeker win rate rose from about 20% to about 45%.
   Next: a longer run to see whether hiders start learning once the seekers settle.
+- **2v1, tiny, v2.1 (seen reward 0.2, 2M steps):** the seekers stopped spinning and lock on: with a hider in sight they walk
+  forward 74% of the time (v2: 0%). 96% against random hiders, 67% against the fleeing bot (chaser bots 79%), self-play 86%.
+  While searching they walk backwards most of the time, since backpedalling is as fast as walking forward.
+  Hiders are still no better than random against the chaser bot (91% caught, random hider 88%).
