@@ -1,6 +1,6 @@
 # Hide and Seek MARL
 
-Valorant-style hide and seek with line of sight, trained with multi-agent reinforcement learning.
+FPS-style hide and seek with line of sight, trained with multi-agent reinforcement learning.
 
 Two teams on a grid map with walls. Hiders try to stay out of sight, seekers try to find and catch them. Each agent only sees what is in its line of sight, so walls and corners matter. No shooting or planting, just hiding and hunting.
 
@@ -19,7 +19,7 @@ Maps are plain text files in `maps/`, so you can draw your own in any text edito
 Included maps:
 
 - **`tiny.txt`** (11 x 11): small debugging map. Train here first so bugs show up in minutes, not hours.
-- **`three_sites.txt`** (45 x 31): original Valorant-style layout with three sites, a mid room, two long lanes, rotation links between sites, and cover boxes. Hiders spawn at the top like defenders, seekers at the bottom like attackers.
+- **`three_sites.txt`** (45 x 31): original FPS-style layout with three sites, a mid room, two long lanes, rotation links between sites, and cover boxes. Hiders spawn at the top like defenders, seekers at the bottom like attackers.
 
 Check and preview any map (also confirms every walkable cell is reachable):
 
@@ -35,7 +35,7 @@ python preview_map.py maps/three_sites.txt
 - **Vision:** an agent sees a cell within its vision range only if no wall blocks the straight line to it.
 - **Catch:** a hider is caught when a seeker reaches an adjacent cell (or the same cell). Agents can share cells.
 - **Round end:** time limit reached (hiders win if any survive) or all hiders caught (seekers win).
-- **Reward (team based):** each step, hiders get +1 if no hider is visible to any seeker and -1 otherwise; seekers get the opposite, plus a bonus per catch.
+- **Reward (team based, zero-sum):** each step, hiders get +1 if no hider is visible to any seeker and -1 otherwise; -5 per catch; +10 for surviving the round or -10 if all are caught. Seekers always get exactly the opposite. Full details in `docs/formulation.md`.
 
 ## Approach
 
@@ -56,7 +56,8 @@ test_env.py    quick checks that the game rules work
 random_demo.py random agents: record one GIF, then baseline win rates and speed
 model.py       small CNN policy and value network
 train.py       PPO self-play training loop
-evaluate.py    load a checkpoint, play rounds, make GIFs and win-rate plots
+evaluate.py    play a checkpoint against random opponents to check it learned
+docs/          formulation.md: the exact game definition for each version
 notebooks/     paste-and-run Colab versions
 runs/          training outputs (ignored by git)
 ```
@@ -79,6 +80,24 @@ python random_demo.py                      # random 1v1 on the tiny map, GIF sav
 python random_demo.py maps/tiny.txt 2 2    # random 2v2
 ```
 
+## Training
+
+```
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # Codespaces / no GPU (small download)
+# Mac: pip install torch     AMD/NVIDIA GPU: see setup notes
+python train.py smoke 20000                # 1 minute check that everything runs
+python train.py                            # full run (TOTAL_STEPS in config.py)
+python evaluate.py runs/<run name>/checkpoints/latest.pt
+```
+
+Each run gets its own folder in `runs/` with a `run_card.md` (every setting, game version, git commit),
+`metrics.csv`, `curves.png`, recorded GIFs and checkpoints. Ctrl+C stops training early and still saves.
+
+**What to look for:** in self-play both teams improve together, so the training win rate can hover
+around the same value even when both are learning. `evaluate.py` plays each trained team against
+random opponents: trained seekers should win far more than the random baseline (about 29% in 1v1),
+and trained hiders should hold random seekers well below it.
+
 ## What each agent sees
 
 A 9 x 9 square centred on itself, with 5 layers:
@@ -97,7 +116,8 @@ PyTorch is installed separately because the right build depends on your GPU:
 
 - **AMD (e.g. RX 9070 GRE) on Windows:** AMD's PyTorch on Windows build (ROCm). See the AMD ROCm on Radeon docs.
 - **NVIDIA:** the CUDA build from pytorch.org.
-- **No GPU / Colab:** the default `pip install torch` works. The grid environment runs fine on CPU.
+- **Mac:** `pip install torch` (uses the Mac GPU, "mps", automatically).
+- **Codespaces / no GPU:** `pip install torch --index-url https://download.pytorch.org/whl/cpu` (CPU-only build, much smaller). The grid environment runs fine on CPU.
 
 ## Licence
 

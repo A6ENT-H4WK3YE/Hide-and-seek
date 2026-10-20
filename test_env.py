@@ -71,6 +71,9 @@ obs, rewards, done, info = env.step([3], [0])  # seeker steps left, now next to 
 check("adjacent seeker catches the hider", not env.hider_alive[0])
 check("round ends when all hiders are caught", done and info["winner"] == "seekers")
 check("catch bonus goes to seekers", rewards["seekers"][0] > 0 and rewards["hiders"][0] < 0)
+expected = cfg.REWARD_SEEN - cfg.REWARD_CATCH - cfg.REWARD_WIN   # -1 - 5 - 10 = -16 for hiders
+check(f"final catch: hiders get seen + catch + loss = {expected}", rewards["hiders"][0] == expected)
+check("zero-sum: seekers get exactly minus the hiders", rewards["seekers"][0] == -rewards["hiders"][0])
 
 # --- rewards ---
 env.reset(seed=0, n_seekers=1, n_hiders=1)
@@ -93,7 +96,9 @@ check("memory fades after losing sight", 0 < env.seeker_memory[0, 2, 2] < 1.0)
 # --- time limit ---
 env.reset(seed=0, n_seekers=1, n_hiders=1)
 place(env, seeker=(1, 8), hider=(1, 1), t=cfg.MAX_STEPS - 1)
-_, _, done, info = env.step([0], [0])
+_, rewards, done, info = env.step([0], [0])
 check("hiders win if they survive the time limit", done and info["winner"] == "hiders")
+expected = cfg.REWARD_HIDDEN + cfg.REWARD_WIN   # +1 + 10 = 11 for hiders
+check(f"surviving the last step: hiders get hidden + win = {expected}", rewards["hiders"][0] == expected)
 
 print("\nall checks passed")

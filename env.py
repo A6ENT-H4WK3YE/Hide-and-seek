@@ -163,24 +163,28 @@ class HideSeekEnv:
         self._update_vision()
 
         # team rewards: is any living hider visible to any seeker?
-        any_seen = bool(self.hiders_seen.any())
+        # (a hider caught this step counts as seen, even though it is no longer "alive")
+        any_seen = bool(self.hiders_seen.any()) or n_caught > 0
         if hiding_phase:
             hider_r = 0.0
         else:
             hider_r = cfg.REWARD_SEEN if any_seen else cfg.REWARD_HIDDEN
             hider_r -= cfg.REWARD_CATCH * n_caught
-        seeker_r = -hider_r
 
+        # round end, plus the win/loss reward on the final step
+        if not self.hider_alive.any():
+            self.done, self.winner = True, "seekers"
+            hider_r -= cfg.REWARD_WIN
+        elif self.t >= cfg.MAX_STEPS:
+            self.done, self.winner = True, "hiders"
+            hider_r += cfg.REWARD_WIN
+
+        # zero-sum between teams: seekers always get exactly minus the hiders' reward
+        seeker_r = -hider_r
         rewards = {
             "seekers": np.full(self.n_seekers, seeker_r, dtype=np.float32),
             "hiders": np.full(self.n_hiders, hider_r, dtype=np.float32),
         }
-
-        # round end
-        if not self.hider_alive.any():
-            self.done, self.winner = True, "seekers"
-        elif self.t >= cfg.MAX_STEPS:
-            self.done, self.winner = True, "hiders"
 
         info = {
             "t": self.t,
