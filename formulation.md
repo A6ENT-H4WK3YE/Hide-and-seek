@@ -5,9 +5,37 @@ time, the game moves on according to their joint action, and each agent only see
 is going on. This file says exactly which game each version is. `GAME_VERSION` in `config.py`
 points to a section here, and every training run's `run_card.md` records it.
 
+## v3: walk or run, with footsteps you can hear
+
+The current version. Everything in v2.1 (below) stays, plus sound. Default map is now `three_sites.txt`
+(250-step rounds, 30-step hiding phase).
+
+### Actions
+A third choice every step, next to move and turn: **walk** or **run** (like holding Shift in CS).
+- **Run:** full speed (1 unit per step), and if the agent actually moves, it makes noise this step.
+- **Walk:** half speed (0.5 units per step), silent. Turning or standing still is always silent.
+- So 5 x 9 x 2 = 90 possible actions per agent. Seekers frozen in the hiding phase make no noise.
+
+### Hearing
+- An agent hears an **enemy** that ran this step if the walking distance between their map cells is at most
+  **6 cells**. Walking distance (the shortest path along the floor) means sound goes round corners but not
+  through walls: two agents either side of a wall can be 2 apart in a straight line and still not hear each other.
+- Teammates' footsteps are not reported (only enemies matter).
+- Works the same both ways: hiders hear running seekers, seekers hear running hiders.
+
+### Observations
+A fifth part, **heard** (5 x 4): enemies heard right now, nearest first: a flag, the direction to them relative to
+where I look (cos, sin) and the walking distance (divided by 20). A heard enemy is also marked in my own
+"last seen enemy" memory on the minimap, the same as a seen one.
+
+### Why
+In v2.1 hiders only knew a seeker was there if it was inside their 90 degree cone, so anyone coming from behind was
+invisible until too late. Footsteps give awareness all the way round, without a reward to exploit. It also creates a
+trade-off for both teams: run and be heard, or walk quietly at half speed.
+
 ## v2: continuous space, 90 degree cone, catch by distance and facing, anti-farming rewards
 
-The current version. Same kind of game as v1 (two-team zero-sum POSG, 2 seekers v 1 hider by default),
+Same kind of game as v1 (two-team zero-sum POSG, 2 seekers v 1 hider by default),
 but played in continuous space. The grid version is kept in git under the tag `v1-grid`.
 
 ### State
@@ -194,6 +222,18 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   At 0.2, keeping the hider in view is worth learning, and hiders (who get the opposite) get a real reason to break
   line of sight.
 - **Still no farming:** watching from 0.9 away for a whole round is worth about +5.5, catching about +30.
+
+### v3: walk or run, with footsteps (see the v3 section above)
+- **What changed:** actions get a third part (walk or run), running makes noise heard by enemies within 6 cells of walking
+  distance, and observations get a "heard" part. Rules for vision, catching and rewards are identical to v2.1.
+- **Why:** hiders could not tell a seeker was behind them. Walking speed and noise go in together: a slower walk without
+  noise would be pointless, and noise without a quiet option gives no choice.
+- **Bots:** they now also react to what they hear. The chaser always runs; the fleeing hider waits silently and runs
+  when it flees. Reference numbers on three_sites (2v1): random v random 0%, chaser v random hider 97% (v2.1: 70%),
+  chaser v fleeing bot 82% (v2.1: 51%): the fleeing bot runs, so the chaser hears it.
+- **Watch out (not changed yet):** with 250-step rounds the anti-farming margin is almost gone. Watching a hider from 0.9
+  away for a whole round pays +30.0, catching it at once +30.1 (undiscounted). With the 0.99 discount the agents actually
+  compare about +15 against +30, so catching still wins, but a fix is due (for example scaling the seen reward by round length).
 
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.

@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 
 import config as cfg
 from env import HideSeekEnv
-from model import TeamNet, get_device, OBS_KEYS, obs_to_tensors
+from model import TeamNet, get_device, OBS_KEYS, ACTION_PARTS, obs_to_tensors
 from render import draw_frame, save_gif
 from bots import Bots
 from matches import play_match
@@ -81,8 +81,9 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- git commit: {git_commit()}\n")
     f.write(f"- device: {device}\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
-    f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + vec (6,) + minimap, "
-            f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES}\n")
+    f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + heard ({cfg.MAX_TEAM_SIZE}, 4) + vec (6,) + minimap, "
+            f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES} x walk/run, "
+            f"walk speed x{cfg.WALK_SPEED_FACTOR}, hearing range {cfg.HEARING_RANGE}\n")
     f.write(f"- rewards (seekers; hiders get minus): seen {cfg.REWARD_SEEN:+} x closeness, unseen {cfg.REWARD_UNSEEN:+}, "
             f"per catch {cfg.REWARD_CATCH:+}, win {cfg.REWARD_WIN:+} plus up to {cfg.REWARD_TIME_BONUS:+} for time left, "
             f"loss {cfg.REWARD_LOSS:+}\n")
@@ -164,7 +165,7 @@ OBS_SHAPES = {key: x.shape for key, x in obs[0]["seekers"][0].items()}
 def new_buffer(n):
     return {
         **{key: np.zeros((T, E, n) + OBS_SHAPES[key], dtype=np.float32) for key in OBS_KEYS},
-        "action": np.zeros((T, E, n, 2), dtype=np.int64),     # (move, turn) per agent
+        "action": np.zeros((T, E, n, ACTION_PARTS), dtype=np.int64),     # (move, turn, speed) per agent
         "logp": np.zeros((T, E, n), dtype=np.float32),
         "value": np.zeros((T, E, n), dtype=np.float32),
         "reward": np.zeros((T, E, n), dtype=np.float32),
@@ -390,14 +391,14 @@ try:
                 o_t = to_device(o_np)
                 with torch.no_grad():
                     a, logp, value = nets[team].act(o_t)
-                act = a.cpu().numpy().reshape(E, n, 2)
+                act = a.cpu().numpy().reshape(E, n, ACTION_PARTS)
 
                 # games where this team plays as a frozen past version: use the past network's actions
                 frozen_here = np.array([frozen_team[e] == team for e in range(E)])
                 if frozen_here.any():
                     with torch.no_grad():
                         past_a, _, _ = past_nets[team].act(o_t)
-                    act = np.where(frozen_here[:, None, None], past_a.cpu().numpy().reshape(E, n, 2), act)
+                    act = np.where(frozen_here[:, None, None], past_a.cpu().numpy().reshape(E, n, ACTION_PARTS), act)
 
                 b = buf[team]
                 for key in OBS_KEYS:

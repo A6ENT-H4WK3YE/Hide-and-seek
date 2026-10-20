@@ -18,8 +18,9 @@ def trained_actions(net, obs_team, device):
 
 
 def random_actions(rng, n):
-    # one random (move, turn) pair per agent
-    return np.stack([rng.integers(0, cfg.N_MOVES, size=n), rng.integers(0, cfg.N_TURNS, size=n)], axis=1)
+    # one random (move, turn, speed) triple per agent
+    return np.stack([rng.integers(0, cfg.N_MOVES, size=n), rng.integers(0, cfg.N_TURNS, size=n),
+                     rng.integers(0, cfg.N_SPEEDS, size=n)], axis=1)
 
 
 def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=None):

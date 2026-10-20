@@ -4,7 +4,7 @@ FPS-style hide and seek with line of sight, trained with multi-agent reinforceme
 
 Two teams on a map with walls, in continuous space. Hiders try to stay out of sight, seekers try to find and catch them. Each agent looks in one direction and only sees what is inside its 90 degree vision cone, so walls, corners and which way you face all matter. No shooting or planting, just hiding and hunting.
 
-This is v2. The earlier grid version (360 degree vision, one cell per step) is kept in git under the tag `v1-grid`.
+This is v3 (v2 plus footsteps). The earlier grid version (360 degree vision, one cell per step) is kept in git under the tag `v1-grid`.
 
 ## Maps
 
@@ -32,7 +32,8 @@ python preview_map.py maps/three_sites.txt
 ## Rules
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
-- **Actions:** every step, a move (stay, forward, back, strafe left, strafe right, 1 unit) and a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees).
+- **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and walk or run.
+- **Sound:** running is full speed (1 unit per step) but enemies within 6 cells of walking distance hear you; walking is half speed and silent. Sound goes round corners, not through walls.
 - **Teams:** 2 seekers v 1 hider for now (variable sizes later).
 - **Hiding phase:** seekers are frozen for the first 15 steps so hiders can get into position.
 - **Vision:** a 90 degree cone, no range limit, blocked by walls. Enemies are checked exactly (straight line between centres). A seeker can see a hider's back without being seen.
@@ -71,8 +72,8 @@ runs/          training outputs (ignored by git)
 ## Roadmap
 
 1. v1: grid world, 360 degree vision (done, tag `v1-grid`).
-2. **v2: continuous space with a 90 degree vision cone (current).**
-3. Walk vs run with sound (running is fast but makes noise; sound blocked by walls).
+2. v2: continuous space with a 90 degree vision cone.
+3. **v3: walk vs run with sound (current).**
 4. Bigger map (`three_sites.txt`) and bigger teams.
 5. Continuous turning, learned memory (GRU), communication between teammates.
 6. Continuous time (positions follow differential equations).
@@ -119,6 +120,8 @@ and trained hiders should hold random seekers well below it.
 wall, a teammate or an enemy. This is the layout in front of it, like a very low resolution screen.
 
 **Enemies in sight:** up to 5, nearest first: which direction (relative to where it looks) and how far.
+
+**Enemies heard:** up to 5 enemies heard running, nearest first: which direction and how far (walking distance).
 
 **Minimap:** the whole map shrunk to 12 x 12, with walls, itself, teammates, where **its team** searched recently
 (inside anyone's cone in the last 10 steps, shared, fading) and its own "last seen enemy" memory.

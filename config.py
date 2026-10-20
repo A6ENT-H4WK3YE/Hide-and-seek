@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v2.1"
+GAME_VERSION = "v3"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -28,7 +28,8 @@ HIDING_PHASE = 30       # seekers frozen for this many steps at the start; 15 on
 
 # ---------- bodies and movement (1 unit = 1 map cell, 1 step = about 1 second) ----------
 AGENT_RADIUS = 0.3      # agents are circles 0.6 wide, so they fit through 1-wide corridors
-MOVE_SPEED = 1.0        # units per step, the same for forward, back and strafing
+MOVE_SPEED = 1.0        # units per step when running, the same for forward, back and strafing
+WALK_SPEED_FACTOR = 0.5 # walking is this fraction of running speed, but silent (like holding Shift in CS)
 MOVE_SUBSTEPS = 4       # each move is done in this many small pieces so nobody clips through a corner
 TURN_ANGLES = [-90, -30, -10, -3, 0, 3, 10, 30, 90]   # degrees per step; positive = clockwise on screen
 
@@ -39,6 +40,10 @@ RAY_NORM = 20.0         # distances in observations are divided by this (keeps t
 CATCH_DISTANCE = 0.8    # caught if a seeker's centre is within this distance of the hider's centre...
 CATCH_ANGLE = 30        # ...the hider is within this many degrees of where the seeker looks, and in sight
 MEMORY_DECAY = 0.9      # how fast each agent's own "last seen enemy" memory fades each step
+
+# ---------- sound ----------
+HEARING_RANGE = 6.0     # an enemy running (and moving) is heard within this walking distance (map cells):
+                        # sound goes round corners but not through walls
 
 # ---------- team search memory and minimap ----------
 SEARCH_MEMORY_STEPS = 10  # shared "searched recently" marks fade to 0 over this many steps
@@ -61,8 +66,10 @@ REWARD_LOSS = -10.0     # hiders survive to the time limit
 # every step each agent picks two things at once:
 #   move: 0 stay, 1 forward, 2 back, 3 strafe left, 4 strafe right (relative to where it looks)
 #   turn: an index into TURN_ANGLES
+#   speed: 0 walk (half speed, silent), 1 run (full speed, can be heard)
 N_MOVES = 5
 N_TURNS = len(TURN_ANGLES)
+N_SPEEDS = 2
 
 # ---------- training (PPO self-play) ----------
 SEED = 42

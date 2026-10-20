@@ -1,23 +1,27 @@
 # Hide and seek in continuous space. Agents are circles with a real position and a heading,
 # walls are the '#' squares of a map file, and each agent sees a 90 degree cone blocked by walls.
+# Running is fast but makes noise that enemies nearby can hear; walking is slow and silent.
 #
 # Usage:
 #   env = HideSeekEnv()
 #   obs = env.reset()
 #   obs, rewards, done, info = env.step(seeker_actions, hider_actions)
 #
-# Actions: one (move, turn) pair per agent, e.g. seeker_actions = [[1, 4], [0, 6]]  (see config.py)
+# Actions: one (move, turn, speed) triple per agent, e.g. seeker_actions = [[1, 4, 1], [0, 6, 0]]  (see config.py)
 # obs is a dict {"seekers": [...], "hiders": [...]}, one entry per agent. Each entry is a dict:
 #   "rays":    (N_RAYS, 4)            per ray, left to right across the cone: distance to what it hit,
 #                                     and whether that is a wall, a teammate or an enemy
 #   "enemies": (MAX_TEAM_SIZE, 4)     enemies I can see right now, nearest first (empty slots are all 0):
 #                                     seen flag, direction relative to where I look (cos, sin), distance
+#   "heard":   (MAX_TEAM_SIZE, 4)     enemies I can hear running right now, nearest first, same layout
+#                                     (distance here is the walking distance the sound travelled)
 #   "vec":     (6,)                   my position, my heading (cos, sin), time, hiding phase
 #   "minimap": (N_MINIMAP_CHANNELS, MINIMAP_SIZE, MINIMAP_SIZE)   the whole map, shrunk
 # rewards is a dict {"seekers": array, "hiders": array}, one number per agent.
 #
 # Positions are (x, y) with y pointing down, 1 unit = 1 map cell (see geometry.py).
 
+from collections import deque
 import numpy as np
 import config as cfg
 from geometry import move_circle, cast_rays, line_clear, wrap_angle
@@ -74,6 +78,26 @@ def pool_matrix(n, m):
     return P
 
 
+def walk_distances(walls):
+    # shortest walking distance (in 4-way steps between cells) from every floor cell to every cell,
+    # worked out once per map: {(row, col): (H, W) array}. Used for hearing and by the bots.
+    H, W = walls.shape
+    out = {}
+    for src in [(y, x) for y in range(H) for x in range(W) if not walls[y, x]]:
+        d = np.full((H, W), 10_000)
+        d[src] = 0
+        queue = deque([src])
+        while queue:
+            y, x = queue.popleft()
+            for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < H and 0 <= nx < W and not walls[ny, nx] and d[ny, nx] == 10_000:
+                    d[ny, nx] = d[y, x] + 1
+                    queue.append((ny, nx))
+        out[src] = d
+    return out
+
+
 def cell_of(pos):
     # (row, column) of the map cell a point is in
     return int(pos[1]), int(pos[0])
@@ -87,6 +111,7 @@ class HideSeekEnv:
         self.rng = np.random.default_rng(cfg.SEED)
         # distances along a ray where we check which cell it passes over (long enough for the whole map)
         self.ray_samples = np.arange(0.0, np.hypot(self.H, self.W), RAY_SAMPLE)
+        self.path_dist = walk_distances(self.walls)
 
         # minimap: averaging matrices (minimap = Ry @ full_map @ Rx), and which minimap
         # cells each map row / column belongs to (for marking single points like agents)
@@ -118,6 +143,8 @@ class HideSeekEnv:
         self.seeker_heading = self.rng.uniform(-np.pi, np.pi, n_seekers)
         self.hider_heading = self.rng.uniform(-np.pi, np.pi, n_hiders)
         self.hider_alive = np.ones(n_hiders, dtype=bool)
+        self.seeker_noisy = np.zeros(n_seekers, dtype=bool)   # made running noise this step
+        self.hider_noisy = np.zeros(n_hiders, dtype=bool)
         self.t = 0
         self.done = False
         self.winner = None
@@ -131,6 +158,7 @@ class HideSeekEnv:
             "hiders": np.zeros((self.H, self.W), dtype=np.float32),
         }
         self._update_sight()
+        self._update_hearing()
         self._update_memory()
         return self._get_obs()
 
@@ -144,21 +172,26 @@ class HideSeekEnv:
     def step(self, seeker_actions, hider_actions):
         assert not self.done, "round is over, call reset()"
         hiding_phase = self.t < cfg.HIDING_PHASE
-        seeker_actions = np.asarray(seeker_actions).reshape(self.n_seekers, 2)
-        hider_actions = np.asarray(hider_actions).reshape(self.n_hiders, 2)
+        seeker_actions = np.asarray(seeker_actions).reshape(self.n_seekers, 3)
+        hider_actions = np.asarray(hider_actions).reshape(self.n_hiders, 3)
 
-        # hiders act (caught hiders stay where they are)
+        # hiders act (caught hiders stay where they are, silently)
+        self.hider_noisy[:] = False
         for j in range(self.n_hiders):
             if self.hider_alive[j]:
-                self.hiders[j], self.hider_heading[j] = self._act(self.hiders[j], self.hider_heading[j], hider_actions[j])
+                self.hiders[j], self.hider_heading[j], self.hider_noisy[j] = self._act(
+                    self.hiders[j], self.hider_heading[j], hider_actions[j])
 
-        # seekers act, unless they are still frozen in the hiding phase (no moving, no turning)
+        # seekers act, unless they are still frozen in the hiding phase (no moving, no turning, no noise)
+        self.seeker_noisy[:] = False
         if not hiding_phase:
             for i in range(self.n_seekers):
-                self.seekers[i], self.seeker_heading[i] = self._act(self.seekers[i], self.seeker_heading[i], seeker_actions[i])
+                self.seekers[i], self.seeker_heading[i], self.seeker_noisy[i] = self._act(
+                    self.seekers[i], self.seeker_heading[i], seeker_actions[i])
 
         self.t += 1
         self._update_sight()
+        self._update_hearing()
         any_seen = bool(self.hiders_seen.any())
 
         # rewards, written from the seekers' side (hiders get exactly minus this)
@@ -213,15 +246,18 @@ class HideSeekEnv:
         return self._get_obs(), rewards, self.done, info
 
     def _act(self, pos, heading, action):
-        # turn first, then move relative to the new heading, sliding along walls
-        move, turn = int(action[0]), int(action[1])
+        # turn first, then move relative to the new heading, sliding along walls.
+        # Running is full speed and makes noise (only if actually moving); walking is half speed and silent.
+        move, turn, run = int(action[0]), int(action[1]), int(action[2])
         heading = wrap_angle(heading + TURNS[turn])
         fwd, right = MOVES[move]
+        speed = cfg.MOVE_SPEED * (1.0 if run else cfg.WALK_SPEED_FACTOR)
         # "right" is 90 degrees clockwise from where the agent looks
-        dx = (fwd * np.cos(heading) - right * np.sin(heading)) * cfg.MOVE_SPEED
-        dy = (fwd * np.sin(heading) + right * np.cos(heading)) * cfg.MOVE_SPEED
+        dx = (fwd * np.cos(heading) - right * np.sin(heading)) * speed
+        dy = (fwd * np.sin(heading) + right * np.cos(heading)) * speed
         x, y = move_circle(self.walls, pos[0], pos[1], dx, dy, cfg.AGENT_RADIUS, cfg.MOVE_SUBSTEPS)
-        return np.array([x, y]), heading
+        noisy = bool(run) and move != 0
+        return np.array([x, y]), heading, noisy
 
     def _closeness(self):
         # 1 when a seeker touches a hider it sees, falling to 0 at CLOSENESS_RANGE; the best pair counts
@@ -285,6 +321,19 @@ class HideSeekEnv:
         self.view = np.zeros((A, self.H, self.W), dtype=bool)
         self.view[who[keep], rows[keep], cols[keep]] = True
 
+    def _update_hearing(self):
+        # seeker_hears[i, j]: seeker i hears hider j running, within HEARING_RANGE walking distance (and the other way round)
+        self.seeker_hears = np.zeros((self.n_seekers, self.n_hiders), dtype=bool)
+        self.hider_hears = np.zeros((self.n_hiders, self.n_seekers), dtype=bool)
+        self.sound_dist = np.zeros((self.n_seekers, self.n_hiders))     # walking distance between each pair
+        for i in range(self.n_seekers):
+            d = self.path_dist[cell_of(self.seekers[i])]
+            for j in range(self.n_hiders):
+                self.sound_dist[i, j] = d[cell_of(self.hiders[j])]
+                close = self.sound_dist[i, j] <= cfg.HEARING_RANGE
+                self.seeker_hears[i, j] = close and self.hider_noisy[j] and self.hider_alive[j]
+                self.hider_hears[j, i] = close and self.seeker_noisy[i] and self.hider_alive[j]
+
     def _update_memory(self):
         # once per step: fade old info, clear cells I can see are empty, mark enemies I see
         ns = self.n_seekers
@@ -292,13 +341,13 @@ class HideSeekEnv:
         self.hider_memory *= cfg.MEMORY_DECAY
         for i in range(ns):
             self.seeker_memory[i][self.view[i]] = 0.0
-            for j in np.where(self.seeker_sees[i])[0]:
+            for j in np.where(self.seeker_sees[i] | self.seeker_hears[i])[0]:
                 self.seeker_memory[(i,) + cell_of(self.hiders[j])] = 1.0
         for j in range(self.n_hiders):
             if not self.hider_alive[j]:
                 continue
             self.hider_memory[j][self.view[ns + j]] = 0.0
-            for i in np.where(self.hider_sees[j])[0]:
+            for i in np.where(self.hider_sees[j] | self.hider_hears[j])[0]:
                 self.hider_memory[(j,) + cell_of(self.seekers[i])] = 1.0
 
         # shared team search memory: fade by 1/SEARCH_MEMORY_STEPS, then mark everything inside the team's cones
@@ -319,20 +368,25 @@ class HideSeekEnv:
         rows, cols = self.block_rows[y], self.block_cols[x]
         layer[rows, cols] = np.maximum(layer[rows, cols], value)
 
-    def _agent_obs(self, a, me, heading, teammates, enemies_seen, memory, searched_small):
+    def _slots(self, me, heading, positions, distances):
+        # up to MAX_TEAM_SIZE enemies, nearest first: flag, direction relative to where I look (cos, sin), distance
+        out = np.zeros((cfg.MAX_TEAM_SIZE, ENEMY_FEATURES), dtype=np.float32)
+        if len(positions) > 0:
+            rel = np.array(positions) - me
+            angle = np.arctan2(rel[:, 1], rel[:, 0]) - heading
+            for k, e in enumerate(np.argsort(distances)[:cfg.MAX_TEAM_SIZE]):
+                out[k] = [1.0, np.cos(angle[e]), np.sin(angle[e]), distances[e] / cfg.RAY_NORM]
+        return out
+
+    def _agent_obs(self, a, me, heading, teammates, enemies_seen, enemies_heard, memory, searched_small):
         # rays: distance, plus one of wall / teammate / enemy
         rays = np.zeros((cfg.N_RAYS, RAY_FEATURES), dtype=np.float32)
         rays[:, 0] = self.ray_dist[a] / cfg.RAY_NORM
         rays[np.arange(cfg.N_RAYS), 1 + self.ray_hit[a]] = 1.0
 
-        # enemies I can see right now, nearest first: direction relative to where I look, and distance
-        enemies = np.zeros((cfg.MAX_TEAM_SIZE, ENEMY_FEATURES), dtype=np.float32)
-        if len(enemies_seen) > 0:
-            rel = np.array(enemies_seen) - me
-            dist = np.hypot(rel[:, 0], rel[:, 1])
-            angle = np.arctan2(rel[:, 1], rel[:, 0]) - heading
-            for k, e in enumerate(np.argsort(dist)[:cfg.MAX_TEAM_SIZE]):
-                enemies[k] = [1.0, np.cos(angle[e]), np.sin(angle[e]), dist[e] / cfg.RAY_NORM]
+        # enemies I can see right now (straight-line distance), and enemies I can hear (walking distance)
+        enemies = self._slots(me, heading, [p for p, _ in enemies_seen], [np.hypot(*(p - me)) for p, _ in enemies_seen])
+        heard = self._slots(me, heading, [p for p, _ in enemies_heard], [d for _, d in enemies_heard])
 
         # extra numbers: where am I, which way am I looking, how far through the round, still hiding phase?
         vec = np.array([
@@ -353,7 +407,7 @@ class HideSeekEnv:
         mm[MM_SEARCHED] = searched_small
         for (y, x) in np.argwhere(memory > 0.01):
             self._mark(mm[MM_MEMORY], (x + 0.5, y + 0.5), memory[y, x])
-        return {"rays": rays, "enemies": enemies, "vec": vec, "minimap": mm}
+        return {"rays": rays, "enemies": enemies, "heard": heard, "vec": vec, "minimap": mm}
 
     def _get_obs(self):
         # the shrunk team search maps are the same for every teammate, so work them out once
@@ -362,14 +416,16 @@ class HideSeekEnv:
         seekers_obs = []
         for i in range(ns):
             mates = [self.seekers[k] for k in range(ns) if k != i]
-            seen = [self.hiders[j] for j in np.where(self.seeker_sees[i])[0]]
-            seekers_obs.append(self._agent_obs(i, self.seekers[i], self.seeker_heading[i], mates, seen,
+            seen = [(self.hiders[j], None) for j in np.where(self.seeker_sees[i])[0]]
+            heard = [(self.hiders[j], self.sound_dist[i, j]) for j in np.where(self.seeker_hears[i] & self.hider_alive)[0]]
+            seekers_obs.append(self._agent_obs(i, self.seekers[i], self.seeker_heading[i], mates, seen, heard,
                                                self.seeker_memory[i], small["seekers"]))
         hiders_obs = []
         for j in range(self.n_hiders):
             mates = [p for k, p in enumerate(self.hiders) if k != j and self.hider_alive[k]]
-            seen = [self.seekers[i] for i in np.where(self.hider_sees[j])[0]]
-            hiders_obs.append(self._agent_obs(ns + j, self.hiders[j], self.hider_heading[j], mates, seen,
+            seen = [(self.seekers[i], None) for i in np.where(self.hider_sees[j])[0]]
+            heard = [(self.seekers[i], self.sound_dist[i, j]) for i in np.where(self.hider_hears[j])[0]]
+            hiders_obs.append(self._agent_obs(ns + j, self.hiders[j], self.hider_heading[j], mates, seen, heard,
                                               self.hider_memory[j], small["hiders"]))
         return {"seekers": seekers_obs, "hiders": hiders_obs}
 

@@ -46,8 +46,8 @@ agents playing in a 3D world. The goal can grow later.
 
 Roadmap:
 1. v1: grid world (done, see results)
-2. **v2: continuous space with cone vision (built on branch `v2-continuous`, v2.1 is current, see results)**
-3. Walk vs run with sound (running is fast but makes noise; sound blocked by walls)
+2. v2: continuous space with cone vision (built on branch `v2-continuous`, v2.1 results below)
+3. **v3: walk vs run with sound (built, first big-map run under way)**
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
 6. Continuous time (positions follow differential equations)
@@ -56,7 +56,7 @@ Roadmap:
 ## Repo layout (v2)
 
 ```
-config.py       all settings in one place (GAME_VERSION, bodies, vision, rewards, training, pool, bots)
+config.py       all settings in one place (GAME_VERSION, bodies, vision, sound, rewards, training, pool, bots)
 geometry.py     moving round agents among square walls (slide), casting rays (all at once, cell by cell)
 env.py          the game: movement, vision cones, catches, rewards, observations
 render.py       draws frames and GIFs
@@ -230,6 +230,19 @@ is the stepping stone to the continuous-time version of the end goal.
    - enemy slots padded to `MAX_TEAM_SIZE` (5) so bigger teams work later
    - rays stop at bodies as well as walls; "searched" marks the map cells the rays pass over (up to the wall)
    - sight is one-way now (a seeker can see a hider's back), accepted as FPS-like, documented in formulation.md
+
+## v3 decisions (made 2026-10-21)
+
+- Moeez's idea: hiders were not aware of seekers behind them, so add footsteps. No extra reward for "seeing a seeker and
+  running away" (could be exploited).
+- A third action part, walk or run. Walk = 0.5 x speed and silent (like CS, about half speed; 0.75 would make walking
+  nearly free). Run = full speed, noisy, but only if actually moving.
+- Hearing range **6 cells of walking distance** (path along the floor, so round corners but not through walls). 3 x 3 or
+  4 x 4 was too small: you would only hear a seeker already in catch range.
+- Only enemies' noise is reported; heard enemies go into a "heard" observation (direction, walking distance) and into the
+  personal "last seen enemy" memory. Same for both teams. Bots react to sound too.
+- Still queued, one change each: slower backpedal and strafe; team spotting; the anti-farming margin on 250-step rounds
+  (watching a hider point blank for a whole round now pays about the same as catching, undiscounted).
 
 ## v2 as built (branch `v2-continuous`)
 

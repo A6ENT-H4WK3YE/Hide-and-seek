@@ -1,4 +1,4 @@
-# Draw the game as images and save GIFs: walls, vision cones, agents and where they look.
+# Draw the game as images and save GIFs: walls, vision cones, agents, where they look and who is making noise.
 #
 #   frame = draw_frame(env)            -> RGB numpy array of the current state
 #   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF
@@ -66,14 +66,18 @@ def draw_frame(env, show_vision=True):
                 (x0, y0), (x1, y1) = env.seekers[i], env.hiders[j]
                 ax.plot([x0, x1], [y0, y1], "--", color=SEEKER_COL, linewidth=1.2)
 
-    # agents: a circle the size of their body, and a short line showing where they look
+    # agents: a circle the size of their body, and a short line showing where they look.
+    # A dashed ring means the agent ran this step (made noise enemies nearby can hear).
     r = cfg.AGENT_RADIUS
-    for team, positions, headings, colour in [("seekers", env.seekers, env.seeker_heading, SEEKER_COL),
-                                              ("hiders", env.hiders, env.hider_heading, HIDER_COL)]:
+    for team, positions, headings, noisy, colour in [
+            ("seekers", env.seekers, env.seeker_heading, env.seeker_noisy, SEEKER_COL),
+            ("hiders", env.hiders, env.hider_heading, env.hider_noisy, HIDER_COL)]:
         for k, (p, h) in enumerate(zip(positions, headings)):
             if team == "hiders" and not env.hider_alive[k]:
                 ax.scatter(p[0], p[1], s=120 if env.W <= 15 else 40, color="#777777", marker="X", zorder=3)
                 continue
+            if noisy[k]:
+                ax.add_patch(Circle((p[0], p[1]), 2.5 * r, fill=False, edgecolor=colour, linestyle="--", linewidth=1.0, zorder=3))
             ax.add_patch(Circle((p[0], p[1]), r, facecolor=colour, edgecolor="white", linewidth=1.0, zorder=3))
             ax.plot([p[0], p[0] + 2.2 * r * np.cos(h)], [p[1], p[1] + 2.2 * r * np.sin(h)],
                     color="white", linewidth=1.4, zorder=4)
