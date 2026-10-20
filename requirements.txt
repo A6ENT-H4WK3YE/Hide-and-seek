@@ -1,0 +1,5 @@
+numpy
+matplotlib
+imageio
+pillow
+# torch is installed separately, see README (build depends on your GPU)
