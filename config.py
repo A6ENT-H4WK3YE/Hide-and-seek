@@ -12,7 +12,7 @@ GAME_VERSION = "v2.1"
 # Stage 2: maps/three_sites.txt (45x31, FPS-style) -> raise MAX_STEPS to ~250
 #          and HIDING_PHASE to ~30 when you switch
 # Every '#' cell becomes a solid 1 x 1 square; agents move freely (continuously) on the rest.
-MAP_FILE = "maps/tiny.txt"
+MAP_FILE = "maps/three_sites.txt"
 FIXED_EVAL_SEED = 0     # same spawns for every recorded GIF, for fair comparison
 
 # ---------- teams ----------
@@ -23,8 +23,8 @@ N_SEEKERS = 2           # 1v1 on tiny.txt is always a hider win with perfect pla
 N_HIDERS = 1
 
 # ---------- round ----------
-MAX_STEPS = 100         # time limit per round (discrete steps)
-HIDING_PHASE = 15       # seekers frozen for this many steps at the start
+MAX_STEPS = 250         # time limit per round (discrete steps); 100 on tiny.txt
+HIDING_PHASE = 30       # seekers frozen for this many steps at the start; 15 on tiny.txt
 
 # ---------- bodies and movement (1 unit = 1 map cell, 1 step = about 1 second) ----------
 AGENT_RADIUS = 0.3      # agents are circles 0.6 wide, so they fit through 1-wide corridors
@@ -66,7 +66,7 @@ N_TURNS = len(TURN_ANGLES)
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
-TOTAL_STEPS = 2_000_000 # total environment steps across all parallel games
+TOTAL_STEPS = 5_000_000 # total environment steps across all parallel games (2M was enough on tiny.txt)
 N_ENVS = 16             # games played in parallel (one network call covers all of them)
 ROLLOUT_STEPS = 128     # steps per game collected before each update (16 x 128 = 2048 per update)
 LEARNING_RATE = 3e-4
