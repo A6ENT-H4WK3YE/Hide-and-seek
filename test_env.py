@@ -5,7 +5,7 @@ import os
 import tempfile
 import numpy as np
 import config as cfg
-from env import HideSeekEnv, compute_visibility
+from env import HideSeekEnv, compute_visibility, N_CHANNELS, N_MINIMAP_CHANNELS, CH_SEARCHED, MM_ME, MM_TEAMMATES, MM_SEARCHED
 
 TEST_MAP = """\
 ###########
@@ -84,7 +84,10 @@ check("hidden hider gets +1, seeker -1", rewards["hiders"][0] == 1 and rewards["
 # --- observations ---
 obs = env._get_obs()
 g = obs["seekers"][0]["grid"]
-check(f"observation shape is (5, {cfg.OBS_WINDOW}, {cfg.OBS_WINDOW})", g.shape == (5, cfg.OBS_WINDOW, cfg.OBS_WINDOW))
+check(f"close-up shape is ({N_CHANNELS}, {cfg.OBS_WINDOW}, {cfg.OBS_WINDOW})", g.shape == (N_CHANNELS, cfg.OBS_WINDOW, cfg.OBS_WINDOW))
+mm = obs["seekers"][0]["minimap"]
+check(f"minimap shape is ({N_MINIMAP_CHANNELS}, {cfg.MINIMAP_SIZE}, {cfg.MINIMAP_SIZE})", mm.shape == (N_MINIMAP_CHANNELS, cfg.MINIMAP_SIZE, cfg.MINIMAP_SIZE))
+check("minimap marks my own position", mm[MM_ME].sum() > 0)
 check("agent's own cell is never a wall", g[0, cfg.OBS_WINDOW // 2, cfg.OBS_WINDOW // 2] == 0)
 
 # --- memory ---
@@ -100,5 +103,35 @@ _, rewards, done, info = env.step([0], [0])
 check("hiders win if they survive the time limit", done and info["winner"] == "hiders")
 expected = cfg.REWARD_HIDDEN + cfg.REWARD_WIN   # +1 + 10 = 11 for hiders
 check(f"surviving the last step: hiders get hidden + win = {expected}", rewards["hiders"][0] == expected)
+
+# --- shared team search memory ---
+env.reset(seed=0, n_seekers=2, n_hiders=1)
+env.seekers = np.array([[2, 6], [1, 8]])     # seeker 0 looks along the open row 2, seeker 1 sits in the right corner
+env.hiders = np.array([[1, 1]])
+env.hider_alive[:] = True
+env.t = cfg.HIDING_PHASE
+env._update_vision()
+obs = env._get_obs()
+check("a cell seeker 0 sees is marked as searched", env.searched["seekers"][2, 3] == 1.0)
+check("seeker 1 can't see that cell itself", not env.view_of(env.seekers[1])[2, 3])
+r = cfg.OBS_WINDOW // 2
+in_window = obs["seekers"][1]["grid"][CH_SEARCHED, r + (2 - 1), r + (3 - 8)]   # cell (2, 3) seen from (1, 8)
+check("but it shows as searched in seeker 1's own observation (shared by the team)", in_window == 1.0)
+check("hiders have their own separate searched layer", env.searched["hiders"][2, 3] != env.searched["seekers"][2, 3] or
+      env.view_of(env.hiders[0])[2, 3])
+check("teammate appears on the minimap", obs["seekers"][0]["minimap"][MM_TEAMMATES].sum() > 0)
+
+# move both seekers away so (2, 3) is out of everyone's sight, then count the steps until it fades out
+env.seekers = np.array([[1, 8], [1, 9]])
+env.hiders = np.array([[1, 1]])
+values = []
+for k in range(cfg.SEARCH_MEMORY_STEPS + 2):
+    env._update_vision()
+    values.append(float(env.searched["seekers"][2, 3]))
+check("the cell is now out of every seeker's sight", not env.view_of(env.seekers[0])[2, 3] and not env.view_of(env.seekers[1])[2, 3])
+check(f"searched mark fades steadily ({values[0]:.1f} -> {values[1]:.1f} -> {values[2]:.1f} ...)", values[0] > values[1] > values[2] > 0)
+steps_to_zero = values.index(0.0) + 1
+check(f"searched mark is gone after exactly {cfg.SEARCH_MEMORY_STEPS} steps unseen (took {steps_to_zero})",
+      steps_to_zero == cfg.SEARCH_MEMORY_STEPS)
 
 print("\nall checks passed")

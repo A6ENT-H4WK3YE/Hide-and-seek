@@ -20,6 +20,7 @@
 import os
 import sys
 import csv
+import copy
 import time
 import datetime
 import subprocess
@@ -33,9 +34,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import config as cfg
-from env import HideSeekEnv, N_CHANNELS
+from env import HideSeekEnv, N_CHANNELS, N_MINIMAP_CHANNELS
 from model import TeamNet, get_device
 from render import draw_frame, save_gif
+from bots import Bots
+from matches import play_match
 
 assert not cfg.RANDOM_TEAM_SIZES, "random team sizes come later: set RANDOM_TEAM_SIZES = False"
 
@@ -43,6 +46,7 @@ TEAMS = ["seekers", "hiders"]
 E, T = cfg.N_ENVS, cfg.ROLLOUT_STEPS
 N_AGENTS = {"seekers": cfg.N_SEEKERS, "hiders": cfg.N_HIDERS}
 W = cfg.OBS_WINDOW
+MM = cfg.MINIMAP_SIZE
 total_steps = int(sys.argv[2]) if len(sys.argv) > 2 else cfg.TOTAL_STEPS
 
 np.random.seed(cfg.SEED)
@@ -75,11 +79,12 @@ settings = {k: getattr(cfg, k) for k in dir(cfg) if k.isupper()}
 with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"# Run card: {run_name}\n\n")
     f.write(f"- started: {datetime.datetime.now():%Y-%m-%d %H:%M}\n")
-    f.write(f"- game version: {cfg.GAME_VERSION} (see docs/formulation.md)\n")
+    f.write(f"- game version: {cfg.GAME_VERSION} (see formulation.md)\n")
     f.write(f"- git commit: {git_commit()}\n")
     f.write(f"- device: {device}\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
-    f.write(f"- observation: grid ({N_CHANNELS}, {W}, {W}) + vec (4,), actions: {cfg.N_ACTIONS}\n")
+    f.write(f"- observation: grid ({N_CHANNELS}, {W}, {W}) + minimap ({N_MINIMAP_CHANNELS}, {MM}, {MM}) + vec (4,), "
+            f"actions: {cfg.N_ACTIONS}\n")
     f.write(f"- rewards (hiders; seekers get minus): hidden {cfg.REWARD_HIDDEN:+}, seen {cfg.REWARD_SEEN:+}, "
             f"per catch {-cfg.REWARD_CATCH:+}, win/loss +-{cfg.REWARD_WIN}\n")
     f.write(f"- total steps: {total_steps:,}\n\n")
@@ -99,17 +104,61 @@ eval_env = HideSeekEnv(cfg.MAP_FILE)
 nets = {team: TeamNet().to(device) for team in TEAMS}
 opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, eps=1e-5) for team in TEAMS}
 
+# ---------- opponent pool ----------
+# pool[team] holds frozen snapshots of that team's network from earlier in training.
+# past_nets[team] is the snapshot that team plays with, in games where it is "frozen".
+pool = {team: [copy.deepcopy(nets[team].state_dict())] for team in TEAMS}
+past_nets = {team: TeamNet().to(device) for team in TEAMS}
+pool_rng = np.random.default_rng(cfg.SEED + 1)
+
+
+def pick_frozen_team():
+    # for a new game: None (both teams current, normal self-play) or the team that plays as a past version
+    if cfg.OPPONENT_POOL and pool_rng.random() < cfg.POOL_PROB:
+        return str(pool_rng.choice(TEAMS))
+    return None
+
+
+def load_past_opponents():
+    for team in TEAMS:
+        past_nets[team].load_state_dict(pool[team][pool_rng.integers(len(pool[team]))])
+
+
+frozen_team = [pick_frozen_team() for _ in range(E)]
+
+# ---------- benchmark bots ----------
+bot_env = HideSeekEnv(cfg.MAP_FILE)
+bots = Bots(bot_env)
+
+# reference numbers for THIS map and team size, measured once so the curves have the right yardsticks
+REF = {}
+if cfg.BOT_EVAL_GAMES > 0:
+    print(f"measuring bot reference numbers for {cfg.N_SEEKERS}v{cfg.N_HIDERS} on {cfg.MAP_FILE}...")
+    for s_pol, h_pol, key in [("random", "random", "random_vs_random"),
+                              ("bot", "random", "chaser_vs_random"),
+                              ("bot", "bot", "chaser_vs_flee")]:
+        REF[key] = play_match(bot_env, bots, {"seekers": s_pol, "hiders": h_pol}, None, 300, device, seed=50_000)["seeker_win"]
+    print(f"  random seekers vs random hiders: seekers win {REF['random_vs_random']:.0%}")
+    print(f"  chaser bots vs random hiders:    seekers win {REF['chaser_vs_random']:.0%}")
+    print(f"  chaser bots vs fleeing bots:     seekers win {REF['chaser_vs_flee']:.0%}")
+    with open(os.path.join(run_dir, "run_card.md"), "a") as f:
+        f.write("\n## Bot reference numbers (seeker win rate)\n\n")
+        for k, val in REF.items():
+            f.write(f"- {k}: {val:.1%}\n")
+
 
 def stack_team(obs_all, team):
     # every agent of one team across all parallel games -> arrays of shape (E * n, ...)
     flat = [o[team][k] for o in obs_all for k in range(len(o[team]))]
-    return np.stack([x["grid"] for x in flat]), np.stack([x["vec"] for x in flat])
+    return (np.stack([x["grid"] for x in flat]), np.stack([x["minimap"] for x in flat]),
+            np.stack([x["vec"] for x in flat]))
 
 
 # storage for one rollout, per team: index [step, game, agent]
 def new_buffer(n):
     return {
         "grid": np.zeros((T, E, n, N_CHANNELS, W, W), dtype=np.float32),
+        "minimap": np.zeros((T, E, n, N_MINIMAP_CHANNELS, MM, MM), dtype=np.float32),
         "vec": np.zeros((T, E, n, 4), dtype=np.float32),
         "action": np.zeros((T, E, n), dtype=np.int64),
         "logp": np.zeros((T, E, n), dtype=np.float32),
@@ -117,7 +166,8 @@ def new_buffer(n):
         "reward": np.zeros((T, E, n), dtype=np.float32),
         "done": np.zeros((T, E, n), dtype=np.float32),
         # valid = this step counts for learning. Not valid: seekers during the hiding phase
-        # (their actions do nothing) and hiders after they've been caught.
+        # (their actions do nothing), hiders after they've been caught, and any team playing
+        # as a frozen past version (that data came from an old network, not the one learning).
         "valid": np.zeros((T, E, n), dtype=np.float32),
     }
 
@@ -135,9 +185,10 @@ def record(games_done, steps_done):
     while not done:
         acts = {}
         for team in TEAMS:
-            g, v = stack_team([o], team)
+            g, m, v = stack_team([o], team)
             with torch.no_grad():
-                a, _, _ = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(v, device=device))
+                a, _, _ = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(m, device=device),
+                                         torch.as_tensor(v, device=device))
             acts[team] = a.cpu().numpy()
         o, _, done, info = eval_env.step(acts["seekers"], acts["hiders"])
         frames.append(draw_frame(eval_env))
@@ -153,6 +204,18 @@ def record(games_done, steps_done):
     }
     torch.save(ckpt, os.path.join(run_dir, "checkpoints", f"ckpt_{games_done:07d}.pt"))
     torch.save(ckpt, os.path.join(run_dir, "checkpoints", "latest.pt"))
+
+    # benchmark against the fixed bots: unlike self-play, these opponents never change,
+    # so these numbers show real progress
+    if cfg.BOT_EVAL_GAMES > 0:
+        hiders_test = play_match(bot_env, bots, {"seekers": "bot", "hiders": "trained"}, nets, cfg.BOT_EVAL_GAMES, device)
+        seekers_test = play_match(bot_env, bots, {"seekers": "trained", "hiders": "random"}, nets, cfg.BOT_EVAL_GAMES, device)
+        with open(bots_csv, "a", newline="") as f:
+            csv.writer(f).writerow([steps_done, games_done, hiders_test["seeker_win"], seekers_test["seeker_win"]])
+        print(f"  -> vs bots: chaser bot beats trained hiders {hiders_test['seeker_win']:.0%} "
+              f"(random hider {REF['chaser_vs_random']:.0%}, fleeing bot {REF['chaser_vs_flee']:.0%}) | "
+              f"trained seekers beat random hiders {seekers_test['seeker_win']:.0%} "
+              f"(random seekers {REF['random_vs_random']:.0%}, chaser bots {REF['chaser_vs_random']:.0%})")
     return info["winner"]
 
 
@@ -161,11 +224,12 @@ def plot_curves():
     data = np.genfromtxt(path, delimiter=",", names=True)
     if data.size < 2:
         return
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    fig, axes = plt.subplots(2, 3, figsize=(16, 7))
     x = data["steps"]
     axes[0, 0].plot(x, data["seeker_win_rate"], color="#c0392b")
-    axes[0, 0].axhline(0.29, color="grey", linestyle="--", linewidth=1, label="random agents (1v1)")
-    axes[0, 0].set_title("seeker win rate (recent games)")
+    if REF:
+        axes[0, 0].axhline(REF["random_vs_random"], color="grey", linestyle="--", linewidth=1, label="random vs random")
+    axes[0, 0].set_title("self-play: seeker win rate (recent games)")
     axes[0, 0].set_ylim(0, 1)
     axes[0, 0].legend()
     axes[0, 1].plot(x, data["hider_return"], color="#2563b0")
@@ -177,7 +241,38 @@ def plot_curves():
     axes[1, 1].plot(x, data["hider_entropy"], color="#2563b0", label="hiders")
     axes[1, 1].set_title("policy entropy (high = random, low = decisive)")
     axes[1, 1].legend()
-    for ax in axes.flat:
+
+    # benchmark panel
+    ax = axes[0, 2]
+    if os.path.exists(bots_csv):
+        bd = np.atleast_1d(np.genfromtxt(bots_csv, delimiter=",", names=True))
+        if bd.size >= 1:
+            ax.plot(bd["steps"], bd["chaser_vs_trained_hiders"], "o-", color="#2563b0",
+                    label="chaser bot beats trained hiders (lower = better hiders)")
+            ax.plot(bd["steps"], bd["trained_seekers_vs_random_hider"], "o-", color="#c0392b",
+                    label="trained seekers beat random hider (higher = better seekers)")
+    for key, label in [("chaser_vs_random", "chaser bots vs random hiders"),
+                       ("random_vs_random", "random vs random"),
+                       ("chaser_vs_flee", "chaser bots vs fleeing bots")]:
+        if key in REF:
+            ax.axhline(REF[key], color="grey", linestyle=":", linewidth=1)
+            ax.text(0, REF[key] + 0.015, f"{label} ({REF[key]:.0%})", fontsize=7, color="grey")
+    ax.set_title("vs fixed benchmark bots")
+    ax.set_ylim(0, 1)
+    ax.legend(fontsize=7, loc="upper right")
+    axes[1, 2].axis("off")
+    axes[1, 2].text(0, 0.9, "How to read this", fontsize=10, fontweight="bold")
+    axes[1, 2].text(0, 0.05,
+                    "Self-play win rate can go up and down forever,\n"
+                    "because both teams keep changing.\n\n"
+                    "The bot panel uses opponents that never change.\n"
+                    "Blue: hiders that learn to run away push it down\n"
+                    "towards the 'chaser vs fleeing bots' line or below.\n"
+                    "Red: seekers that learn to search and chase push it\n"
+                    "up towards the 'chaser vs random hiders' line.\n"
+                    "Grey lines are measured at the start of each run.",
+                    fontsize=9, va="bottom")
+    for ax in axes.flat[:5]:
         ax.set_xlabel("environment steps")
         ax.grid(alpha=0.3)
     plt.tight_layout()
@@ -209,7 +304,7 @@ def ppo_update(team, b, last_value):
     if n < 2:
         return {}
     to_t = lambda x, dtype=torch.float32: torch.as_tensor(x.reshape(T * E * N_AGENTS[team], *x.shape[3:])[keep], dtype=dtype, device=device)
-    g, v = to_t(b["grid"]), to_t(b["vec"])
+    g, m, v = to_t(b["grid"]), to_t(b["minimap"]), to_t(b["vec"])
     actions = to_t(b["action"], torch.int64)
     old_logp, adv_t, ret_t = to_t(b["logp"]), to_t(adv), to_t(returns)
 
@@ -224,7 +319,7 @@ def ppo_update(team, b, last_value):
         perm = torch.randperm(n, device=device)
         # exactly MINIBATCHES chunks of (nearly) equal size, so no tiny leftover chunk
         for idx in torch.tensor_split(perm, cfg.MINIBATCHES):
-            logits, value = net(g[idx], v[idx])
+            logits, value = net(g[idx], m[idx], v[idx])
             dist = torch.distributions.Categorical(logits=logits)
             new_logp = dist.log_prob(actions[idx])
             entropy = dist.entropy().mean()
@@ -269,33 +364,56 @@ csv_fields = ["update", "steps", "games", "seeker_win_rate", "avg_game_length", 
               "seeker_entropy", "hider_entropy", "seeker_v_loss", "hider_v_loss", "seeker_kl", "hider_kl", "steps_per_sec"]
 with open(csv_path, "w", newline="") as f:
     csv.writer(f).writerow(csv_fields)
+bots_csv = os.path.join(run_dir, "bots.csv")
+with open(bots_csv, "w", newline="") as f:
+    csv.writer(f).writerow(["steps", "games", "chaser_vs_trained_hiders", "trained_seekers_vs_random_hider"])
 
 start_time = time.time()
-print(f"training for {total_steps:,} steps ({E} games in parallel, {E * T:,} steps per update)\n")
+print(f"training for {total_steps:,} steps ({E} games in parallel, {E * T:,} steps per update)")
+if cfg.OPPONENT_POOL:
+    print(f"opponent pool on: {cfg.POOL_PROB:.0%} of games use a past version of one team\n")
+else:
+    print("opponent pool off: plain self-play\n")
 
 try:
     while steps_done < total_steps:
+        # pick which past snapshot each team uses when it plays "frozen" during this rollout
+        if cfg.OPPONENT_POOL:
+            load_past_opponents()
+
         # ---------------- 1. collect experience ----------------
         for t in range(T):
             actions = {}
             for team in TEAMS:
                 n = N_AGENTS[team]
-                g, v = stack_team(obs, team)
+                g, m, v = stack_team(obs, team)
+                g_t, m_t, v_t = (torch.as_tensor(x, device=device) for x in (g, m, v))
                 with torch.no_grad():
-                    a, logp, value = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(v, device=device))
+                    a, logp, value = nets[team].act(g_t, m_t, v_t)
+                act = a.cpu().numpy().reshape(E, n)
+
+                # games where this team plays as a frozen past version: use the past network's actions
+                frozen_here = np.array([frozen_team[e] == team for e in range(E)])
+                if frozen_here.any():
+                    with torch.no_grad():
+                        past_a, _, _ = past_nets[team].act(g_t, m_t, v_t)
+                    act = np.where(frozen_here[:, None], past_a.cpu().numpy().reshape(E, n), act)
+
                 b = buf[team]
                 b["grid"][t] = g.reshape(E, n, N_CHANNELS, W, W)
+                b["minimap"][t] = m.reshape(E, n, N_MINIMAP_CHANNELS, MM, MM)
                 b["vec"][t] = v.reshape(E, n, 4)
-                b["action"][t] = a.cpu().numpy().reshape(E, n)
+                b["action"][t] = act
                 b["logp"][t] = logp.cpu().numpy().reshape(E, n)
                 b["value"][t] = value.cpu().numpy().reshape(E, n)
-                actions[team] = b["action"][t]
+                actions[team] = act
 
             for e, env in enumerate(envs):
                 hunting = env.t >= cfg.HIDING_PHASE
                 alive_before = env.hider_alive.copy()
-                buf["seekers"]["valid"][t, e] = float(hunting)
-                buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32)
+                # frozen past versions don't learn, so their steps never count
+                buf["seekers"]["valid"][t, e] = float(hunting and frozen_team[e] != "seekers")
+                buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32) * float(frozen_team[e] != "hiders")
 
                 o, r, done, info = env.step(actions["seekers"][e], actions["hiders"][e])
 
@@ -312,11 +430,14 @@ try:
 
                 if done:
                     games_done += 1
-                    recent_winner.append(1.0 if info["winner"] == "seekers" else 0.0)
-                    recent_len.append(info["t"])
-                    recent_spotted.append(ep_spotted[e] / max(ep_hunting[e], 1))
-                    recent_hider_return.append(ep_hider_return[e])
+                    # self-play stats only count games where both teams are their current selves
+                    if frozen_team[e] is None:
+                        recent_winner.append(1.0 if info["winner"] == "seekers" else 0.0)
+                        recent_len.append(info["t"])
+                        recent_spotted.append(ep_spotted[e] / max(ep_hunting[e], 1))
+                        recent_hider_return.append(ep_hider_return[e])
                     ep_hider_return[e], ep_spotted[e], ep_hunting[e] = 0, 0, 0
+                    frozen_team[e] = pick_frozen_team()
                     o = env.reset(n_seekers=cfg.N_SEEKERS, n_hiders=cfg.N_HIDERS)
                 obs[e] = o
             steps_done += E
@@ -324,12 +445,20 @@ try:
         # ---------------- 2 + 3. advantages and PPO update, per team ----------------
         stats = {}
         for team in TEAMS:
-            g, v = stack_team(obs, team)
+            g, m, v = stack_team(obs, team)
             with torch.no_grad():
-                _, _, last_value = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(v, device=device))
+                _, _, last_value = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(m, device=device),
+                                                  torch.as_tensor(v, device=device))
             last_value = last_value.cpu().numpy().reshape(E, N_AGENTS[team])
             stats[team] = ppo_update(team, buf[team], last_value)
         update += 1
+
+        # every SNAPSHOT_EVERY updates, freeze a copy of both teams into the pool
+        if cfg.OPPONENT_POOL and update % cfg.SNAPSHOT_EVERY == 0:
+            for team in TEAMS:
+                pool[team].append(copy.deepcopy(nets[team].state_dict()))
+                if len(pool[team]) > cfg.POOL_SIZE:
+                    pool[team].pop(0)
 
         # ---------------- logging ----------------
         sps = steps_done / (time.time() - start_time)

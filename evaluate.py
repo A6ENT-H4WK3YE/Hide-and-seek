@@ -1,22 +1,21 @@
-# Test a trained checkpoint by playing it against random opponents.
+# Test a trained checkpoint against random players and the scripted bots (see bots.py).
 #
-# Why: in self-play both teams improve together, so the win rate during training can sit near
-# the same value even while both get much better. Playing each trained team against a RANDOM
-# opponent shows whether it actually learned something.
+# Why: in self-play both teams change together, so the training win rate can go up and down
+# forever. Fixed opponents (random players, bots) show whether each team actually got better.
 #
 # Usage:
 #   python evaluate.py runs/<run name>/checkpoints/latest.pt
-#   python evaluate.py runs/<run name>/checkpoints/latest.pt 1000      (number of games per matchup)
+#   python evaluate.py runs/<run name>/checkpoints/latest.pt 1000      (games per matchup)
 
 import os
 import sys
-import numpy as np
 import torch
 
 import config as cfg
 from env import HideSeekEnv
 from model import TeamNet, get_device
-from render import draw_frame, save_gif
+from bots import Bots
+from matches import play_match
 
 ckpt_path = sys.argv[1]
 n_games = int(sys.argv[2]) if len(sys.argv) > 2 else 500
@@ -33,55 +32,24 @@ for team in ["seekers", "hiders"]:
 print(f"loaded {ckpt_path} (trained for {ckpt['games']:,} games, {ckpt['steps']:,} steps)\n")
 
 env = HideSeekEnv(cfg.MAP_FILE)
-rng = np.random.default_rng(123)
-
-
-def choose(team, obs_team, policy):
-    # policy is "trained" or "random"
-    n = len(obs_team)
-    if policy == "random":
-        return rng.integers(0, cfg.N_ACTIONS, size=n)
-    g = torch.as_tensor(np.stack([o["grid"] for o in obs_team]), device=device)
-    v = torch.as_tensor(np.stack([o["vec"] for o in obs_team]), device=device)
-    with torch.no_grad():
-        a, _, _ = nets[team].act(g, v)
-    return a.cpu().numpy()
-
-
-def play(seeker_policy, hider_policy, games, gif_path=None):
-    seeker_wins, lengths, spotted, hunting = 0, [], 0, 0
-    for k in range(games):
-        obs = env.reset(seed=10_000 + k, n_seekers=cfg.N_SEEKERS, n_hiders=cfg.N_HIDERS)
-        frames = [draw_frame(env)] if (gif_path and k == 0) else None
-        done = False
-        while not done:
-            s_act = choose("seekers", obs["seekers"], seeker_policy)
-            h_act = choose("hiders", obs["hiders"], hider_policy)
-            obs, _, done, info = env.step(s_act, h_act)
-            if not info["hiding_phase"]:
-                hunting += 1
-                spotted += info["any_seen"]
-            if frames is not None:
-                frames.append(draw_frame(env))
-        seeker_wins += info["winner"] == "seekers"
-        lengths.append(info["t"])
-        if frames is not None:
-            save_gif(frames, gif_path)
-    return seeker_wins / games, np.mean(lengths), spotted / max(hunting, 1)
-
-
+bots = Bots(env)
 out_dir = os.path.dirname(os.path.dirname(ckpt_path))   # the run folder
+
 matchups = [
-    ("random", "random", "baseline"),
-    ("trained", "random", "did seekers learn?  (should be well ABOVE baseline)"),
-    ("random", "trained", "did hiders learn?   (should be well BELOW baseline)"),
+    # (seekers, hiders, what it tells you)
+    ("random", "random", "reference: nobody trained"),
+    ("bot", "random", "reference: what a good chaser does to a careless hider"),
+    ("bot", "bot", "reference: a fleeing hider escapes the chaser"),
+    ("trained", "random", "SEEKERS: higher = better (compare with the chaser bot line)"),
+    ("bot", "trained", "HIDERS: lower = better (compare with the two bot lines above)"),
+    ("trained", "bot", "SEEKERS vs the fleeing bot: higher = better (compare with bot vs bot)"),
     ("trained", "trained", "self-play matchup"),
 ]
 print(f"{n_games} games per matchup, {cfg.N_SEEKERS}v{cfg.N_HIDERS} on {cfg.MAP_FILE}\n")
-print(f"{'seekers':>8} vs {'hiders':<8} | seeker win | length | spotted | meaning")
-print("-" * 90)
+print(f"{'seekers':>8} vs {'hiders':<8} | seeker win | length | spotted | what it tells you")
+print("-" * 100)
 for s_pol, h_pol, meaning in matchups:
     gif = os.path.join(out_dir, f"eval_{s_pol}_seekers_vs_{h_pol}_hiders.gif")
-    win, length, spot = play(s_pol, h_pol, n_games, gif_path=gif)
-    print(f"{s_pol:>8} vs {h_pol:<8} | {win:9.1%} | {length:6.1f} | {spot:7.1%} | {meaning}")
+    res = play_match(env, bots, {"seekers": s_pol, "hiders": h_pol}, nets, n_games, device, gif_path=gif)
+    print(f"{s_pol:>8} vs {h_pol:<8} | {res['seeker_win']:9.1%} | {res['length']:6.1f} | {res['spotted']:7.1%} | {meaning}")
 print(f"\nGIFs of the first game of each matchup saved in {out_dir}")

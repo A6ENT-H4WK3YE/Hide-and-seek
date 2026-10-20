@@ -35,7 +35,7 @@ python preview_map.py maps/three_sites.txt
 - **Vision:** an agent sees a cell within its vision range only if no wall blocks the straight line to it.
 - **Catch:** a hider is caught when a seeker reaches an adjacent cell (or the same cell). Agents can share cells.
 - **Round end:** time limit reached (hiders win if any survive) or all hiders caught (seekers win).
-- **Reward (team based, zero-sum):** each step, hiders get +1 if no hider is visible to any seeker and -1 otherwise; -5 per catch; +10 for surviving the round or -10 if all are caught. Seekers always get exactly the opposite. Full details in `docs/formulation.md`.
+- **Reward (team based, zero-sum):** each step, hiders get +1 if no hider is visible to any seeker and -1 otherwise; -5 per catch; +10 for surviving the round or -10 if all are caught. Seekers always get exactly the opposite. Full details in `formulation.md`.
 
 ## Approach
 
@@ -56,8 +56,10 @@ test_env.py    quick checks that the game rules work
 random_demo.py random agents: record one GIF, then baseline win rates and speed
 model.py       small CNN policy and value network
 train.py       PPO self-play training loop
-evaluate.py    play a checkpoint against random opponents to check it learned
-docs/          formulation.md: the exact game definition for each version
+evaluate.py    play a checkpoint against random players and the bots to check it learned
+bots.py        scripted chaser seeker and fleeing hider, used as fixed benchmarks
+matches.py     play any mix of trained / bot / random players (used by train and evaluate)
+formulation.md the exact game definition for each version
 notebooks/     paste-and-run Colab versions
 runs/          training outputs (ignored by git)
 ```
@@ -93,6 +95,14 @@ python evaluate.py runs/<run name>/checkpoints/latest.pt
 Each run gets its own folder in `runs/` with a `run_card.md` (every setting, game version, git commit),
 `metrics.csv`, `curves.png`, recorded GIFs and checkpoints. Ctrl+C stops training early and still saves.
 
+**Opponent pool:** plain self-play can go round in circles (hiders pick a side, seekers learn that side,
+hiders switch...). With `OPPONENT_POOL = True`, half the games are played against frozen past versions
+of the other team, so agents must learn strategies that work against many opponents.
+
+**Benchmark bots:** at every recording, the trained teams also play the scripted bots in `bots.py`, logged in
+`bots.csv` and the "vs fixed benchmark bots" panel of `curves.png`. The chaser bot beats a random hider 75% of the
+time and the fleeing bot 0% of the time, so watching that number fall shows hiders learning to run away.
+
 **What to look for:** in self-play both teams improve together, so the training win rate can hover
 around the same value even when both are learning. `evaluate.py` plays each trained team against
 random opponents: trained seekers should win far more than the random baseline (about 29% in 1v1),
@@ -100,15 +110,19 @@ and trained hiders should hold random seekers well below it.
 
 ## What each agent sees
 
-A 9 x 9 square centred on itself, with 5 layers:
+**Close-up:** an 11 x 11 square centred on itself, with 6 layers:
 
 1. walls
 2. teammates
 3. enemies it can see right now
 4. memory: where it last saw enemies, fading over time (cleared when it looks and they're gone)
 5. the cells it can currently see
+6. searched recently: cells **anyone on its team** looked at in the last 10 steps (shared, fading)
 
-Plus 4 numbers: its position on the map, how far through the round it is, and whether it's still the hiding phase.
+**Minimap:** the whole map shrunk to 12 x 12, with walls, itself, teammates, where the team searched recently,
+and its own enemy memory. Same size on every map, so a network trained on the tiny map can move to the big one.
+
+**Plus 4 numbers:** its position on the map, how far through the round it is, and whether it's still the hiding phase.
 
 ## Setup notes
 

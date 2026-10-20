@@ -6,7 +6,10 @@
 #   obs, rewards, done, info = env.step(seeker_actions, hider_actions)
 #
 # obs is a dict {"seekers": [...], "hiders": [...]}, one entry per agent.
-# Each entry is a dict {"grid": (C, W, W) array, "vec": (4,) array}.
+# Each entry is a dict:
+#   "grid":    (N_CHANNELS, OBS_WINDOW, OBS_WINDOW)   close-up square around the agent
+#   "minimap": (N_MINIMAP_CHANNELS, MINIMAP_SIZE, MINIMAP_SIZE)   the whole map, shrunk
+#   "vec":     (4,)                                   position, time, hiding phase
 # rewards is a dict {"seekers": array, "hiders": array}, one number per agent.
 
 import numpy as np
@@ -27,7 +30,16 @@ CH_TEAMMATES = 1   # teammates
 CH_ENEMIES = 2     # enemies I can see right now
 CH_MEMORY = 3      # where I last saw enemies (fades over time)
 CH_VISIBLE = 4     # cells I can currently see
-N_CHANNELS = 5
+CH_SEARCHED = 5    # cells my TEAM looked at recently (shared, fades to 0 over SEARCH_MEMORY_STEPS)
+N_CHANNELS = 6
+
+# minimap channels (the whole map shrunk to MINIMAP_SIZE x MINIMAP_SIZE)
+MM_WALLS = 0       # fraction of each block that is wall
+MM_ME = 1          # where I am
+MM_TEAMMATES = 2   # where my teammates are
+MM_SEARCHED = 3    # how recently my team searched each block (average over the block)
+MM_MEMORY = 4      # where I last saw enemies (strongest memory in each block)
+N_MINIMAP_CHANNELS = 5
 
 
 def load_map(path):
@@ -82,11 +94,26 @@ def compute_visibility(walls, vision_range):
     return visible
 
 
+def pool_matrix(n, m):
+    # (m, n) matrix that averages n map rows (or columns) down to m minimap rows.
+    # Works for shrinking (big map) and for stretching (map smaller than the minimap).
+    P = np.zeros((m, n), dtype=np.float32)
+    for i in range(m):
+        a = int(np.floor(i * n / m))
+        b = min(max(int(np.floor((i + 1) * n / m)), a + 1), n)
+        P[i, a:b] = 1.0 / (b - a)
+    return P
+
+
 class HideSeekEnv:
 
     def __init__(self, map_file=cfg.MAP_FILE):
         self.grid, self.walls, self.hider_spawns, self.seeker_spawns = load_map(map_file)
         self.H, self.W = self.walls.shape
+        assert cfg.OBS_WINDOW // 2 >= cfg.VISION_RANGE, (
+            f"OBS_WINDOW {cfg.OBS_WINDOW} only reaches {cfg.OBS_WINDOW // 2} cells but VISION_RANGE is "
+            f"{cfg.VISION_RANGE}: agents could be seen by enemies outside their own observation. "
+            f"Set OBS_WINDOW to at least {2 * cfg.VISION_RANGE + 1}.")
         self.visible = compute_visibility(self.walls, cfg.VISION_RANGE)
         self.rng = np.random.default_rng(cfg.SEED)
 
@@ -97,6 +124,17 @@ class HideSeekEnv:
         self.canvas = np.zeros((N_CHANNELS, self.H + 2 * r, self.W + 2 * r), dtype=np.float32)
         self.canvas[CH_WALLS] = 1.0
         self.canvas[CH_WALLS, r:r + self.H, r:r + self.W] = self.walls
+
+        # minimap: averaging matrices (minimap = Ry @ full_map @ Rx), and which minimap
+        # cells each map row / column belongs to (for marking single points like agents)
+        M = cfg.MINIMAP_SIZE
+        self.Ry = pool_matrix(self.H, M)
+        self.Rx = pool_matrix(self.W, M).T
+        # block_rows[y] / block_cols[x]: the minimap rows / columns that cover map row y / column x
+        in_row, in_col = self.Ry > 0, self.Rx.T > 0
+        self.block_rows = [slice(np.where(in_row[:, y])[0].min(), np.where(in_row[:, y])[0].max() + 1) for y in range(self.H)]
+        self.block_cols = [slice(np.where(in_col[:, x])[0].min(), np.where(in_col[:, x])[0].max() + 1) for x in range(self.W)]
+        self.mm_walls = self.Ry @ self.walls.astype(np.float32) @ self.Rx
 
     # ---------- start a round ----------
     def reset(self, seed=None, n_seekers=None, n_hiders=None):
@@ -121,6 +159,11 @@ class HideSeekEnv:
         # each agent remembers where it last saw enemies (full-map grid, fades each step)
         self.seeker_memory = np.zeros((n_seekers, self.H, self.W), dtype=np.float32)
         self.hider_memory = np.zeros((n_hiders, self.H, self.W), dtype=np.float32)
+        # each TEAM shares one "searched recently" map: 1 = looked at this step, fading to 0
+        self.searched = {
+            "seekers": np.zeros((self.H, self.W), dtype=np.float32),
+            "hiders": np.zeros((self.H, self.W), dtype=np.float32),
+        }
         self._update_vision()
         return self._get_obs()
 
@@ -235,8 +278,36 @@ class HideSeekEnv:
                 y, x = self.seekers[i]
                 self.hider_memory[j, y, x] = 1.0
 
+        # shared team search memory: fade by 1/SEARCH_MEMORY_STEPS, then mark everything the team sees now
+        fade = 1.0 / cfg.SEARCH_MEMORY_STEPS
+        for team, positions, alive in [("seekers", self.seekers, np.ones(self.n_seekers, dtype=bool)),
+                                       ("hiders", self.hiders, self.hider_alive)]:
+            searched = self.searched[team]
+            np.maximum(searched - fade, 0.0, out=searched)
+            searched[searched < 1e-6] = 0.0   # snap rounding leftovers to exactly 0
+            for k, pos in enumerate(positions):
+                if alive[k]:
+                    searched[self.visible[self._cell(pos)].reshape(self.H, self.W)] = 1.0
+
     # ---------- observations ----------
-    def _agent_obs(self, pos, teammates, enemies_seen, memory):
+    def _mark(self, layer, pos, value=1.0):
+        # set every minimap cell that covers map cell pos (keeps the strongest value)
+        rows, cols = self.block_rows[pos[0]], self.block_cols[pos[1]]
+        layer[rows, cols] = np.maximum(layer[rows, cols], value)
+
+    def _minimap(self, team, pos, teammates, memory, searched_small):
+        M = cfg.MINIMAP_SIZE
+        mm = np.zeros((N_MINIMAP_CHANNELS, M, M), dtype=np.float32)
+        mm[MM_WALLS] = self.mm_walls
+        self._mark(mm[MM_ME], pos)
+        for p in teammates:
+            self._mark(mm[MM_TEAMMATES], p)
+        mm[MM_SEARCHED] = searched_small
+        for (y, x) in np.argwhere(memory > 0.01):
+            self._mark(mm[MM_MEMORY], (y, x), memory[y, x])
+        return mm
+
+    def _agent_obs(self, team, pos, teammates, enemies_seen, memory, searched_small):
         # draw this agent's layers onto the full-map part of the canvas
         r = self.r
         inside = self.canvas[:, r:r + self.H, r:r + self.W]
@@ -247,6 +318,7 @@ class HideSeekEnv:
             inside[CH_ENEMIES, p[0], p[1]] = 1.0
         inside[CH_MEMORY] = memory
         inside[CH_VISIBLE] = self.visible[self._cell(pos)].reshape(self.H, self.W)
+        inside[CH_SEARCHED] = self.searched[team]
 
         # cut out the OBS_WINDOW x OBS_WINDOW square centred on the agent
         # (the canvas is shifted by r, so the square starts at pos itself)
@@ -260,20 +332,24 @@ class HideSeekEnv:
             self.t / cfg.MAX_STEPS,
             float(self.t < cfg.HIDING_PHASE),
         ], dtype=np.float32)
-        return {"grid": grid, "vec": vec}
+        minimap = self._minimap(team, pos, teammates, memory, searched_small)
+        return {"grid": grid, "minimap": minimap, "vec": vec}
 
     def _get_obs(self):
-        alive_hiders = [self.hiders[j] for j in range(self.n_hiders) if self.hider_alive[j]]
+        # the shrunk team search maps are the same for every teammate, so work them out once
+        small = {team: self.Ry @ self.searched[team] @ self.Rx for team in ["seekers", "hiders"]}
         seekers_obs = []
         for i in range(self.n_seekers):
             mates = [self.seekers[k] for k in range(self.n_seekers) if k != i]
             seen = [self.hiders[j] for j in np.where(self.seeker_sees[i])[0]]
-            seekers_obs.append(self._agent_obs(self.seekers[i], mates, seen, self.seeker_memory[i]))
+            seekers_obs.append(self._agent_obs("seekers", self.seekers[i], mates, seen,
+                                               self.seeker_memory[i], small["seekers"]))
         hiders_obs = []
         for j in range(self.n_hiders):
             mates = [p for k, p in enumerate(self.hiders) if k != j and self.hider_alive[k]]
             seen = [self.seekers[i] for i in np.where(self.hider_sees[j])[0]]
-            hiders_obs.append(self._agent_obs(self.hiders[j], mates, seen, self.hider_memory[j]))
+            hiders_obs.append(self._agent_obs("hiders", self.hiders[j], mates, seen,
+                                              self.hider_memory[j], small["hiders"]))
         return {"seekers": seekers_obs, "hiders": hiders_obs}
 
     # ---------- helpers for rendering ----------
