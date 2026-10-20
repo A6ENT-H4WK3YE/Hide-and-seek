@@ -57,7 +57,7 @@ ENT_COEF = 0.01         # bonus for keeping the policy random (exploration)
 VF_COEF = 0.5           # weight of the value (critic) loss
 MAX_GRAD_NORM = 0.5     # gradient clipping for stability
 HIDDEN = 256            # size of the network's hidden layer
-DEVICE = "auto"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU
+DEVICE = "cpu"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU
 
 # ---------- logging ----------
 RUN_DIR = "runs"
