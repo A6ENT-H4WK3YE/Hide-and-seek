@@ -34,8 +34,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import config as cfg
-from env import HideSeekEnv, N_CHANNELS, N_MINIMAP_CHANNELS
-from model import TeamNet, get_device
+from env import HideSeekEnv
+from model import TeamNet, get_device, OBS_KEYS, obs_to_tensors
 from render import draw_frame, save_gif
 from bots import Bots
 from matches import play_match
@@ -45,8 +45,6 @@ assert not cfg.RANDOM_TEAM_SIZES, "random team sizes come later: set RANDOM_TEAM
 TEAMS = ["seekers", "hiders"]
 E, T = cfg.N_ENVS, cfg.ROLLOUT_STEPS
 N_AGENTS = {"seekers": cfg.N_SEEKERS, "hiders": cfg.N_HIDERS}
-W = cfg.OBS_WINDOW
-MM = cfg.MINIMAP_SIZE
 total_steps = int(sys.argv[2]) if len(sys.argv) > 2 else cfg.TOTAL_STEPS
 
 np.random.seed(cfg.SEED)
@@ -83,10 +81,11 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- git commit: {git_commit()}\n")
     f.write(f"- device: {device}\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
-    f.write(f"- observation: grid ({N_CHANNELS}, {W}, {W}) + minimap ({N_MINIMAP_CHANNELS}, {MM}, {MM}) + vec (4,), "
-            f"actions: {cfg.N_ACTIONS}\n")
-    f.write(f"- rewards (hiders; seekers get minus): hidden {cfg.REWARD_HIDDEN:+}, seen {cfg.REWARD_SEEN:+}, "
-            f"per catch {-cfg.REWARD_CATCH:+}, win/loss +-{cfg.REWARD_WIN}\n")
+    f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + vec (6,) + minimap, "
+            f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES}\n")
+    f.write(f"- rewards (seekers; hiders get minus): seen {cfg.REWARD_SEEN:+} x closeness, unseen {cfg.REWARD_UNSEEN:+}, "
+            f"per catch {cfg.REWARD_CATCH:+}, win {cfg.REWARD_WIN:+} plus up to {cfg.REWARD_TIME_BONUS:+} for time left, "
+            f"loss {cfg.REWARD_LOSS:+}\n")
     f.write(f"- total steps: {total_steps:,}\n\n")
     f.write("## All settings\n\n")
     for k, v in settings.items():
@@ -148,19 +147,24 @@ if cfg.BOT_EVAL_GAMES > 0:
 
 
 def stack_team(obs_all, team):
-    # every agent of one team across all parallel games -> arrays of shape (E * n, ...)
+    # every agent of one team across all parallel games -> dict of arrays of shape (E * n, ...)
     flat = [o[team][k] for o in obs_all for k in range(len(o[team]))]
-    return (np.stack([x["grid"] for x in flat]), np.stack([x["minimap"] for x in flat]),
-            np.stack([x["vec"] for x in flat]))
+    return {key: np.stack([x[key] for x in flat]) for key in OBS_KEYS}
+
+
+def to_device(arrays):
+    return {key: torch.as_tensor(x, device=device) for key, x in arrays.items()}
+
+
+# the shape of each part of one agent's observation, e.g. {"rays": (31, 4), ...}
+OBS_SHAPES = {key: x.shape for key, x in obs[0]["seekers"][0].items()}
 
 
 # storage for one rollout, per team: index [step, game, agent]
 def new_buffer(n):
     return {
-        "grid": np.zeros((T, E, n, N_CHANNELS, W, W), dtype=np.float32),
-        "minimap": np.zeros((T, E, n, N_MINIMAP_CHANNELS, MM, MM), dtype=np.float32),
-        "vec": np.zeros((T, E, n, 4), dtype=np.float32),
-        "action": np.zeros((T, E, n), dtype=np.int64),
+        **{key: np.zeros((T, E, n) + OBS_SHAPES[key], dtype=np.float32) for key in OBS_KEYS},
+        "action": np.zeros((T, E, n, 2), dtype=np.int64),     # (move, turn) per agent
         "logp": np.zeros((T, E, n), dtype=np.float32),
         "value": np.zeros((T, E, n), dtype=np.float32),
         "reward": np.zeros((T, E, n), dtype=np.float32),
@@ -185,10 +189,8 @@ def record(games_done, steps_done):
     while not done:
         acts = {}
         for team in TEAMS:
-            g, m, v = stack_team([o], team)
             with torch.no_grad():
-                a, _, _ = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(m, device=device),
-                                         torch.as_tensor(v, device=device))
+                a, _, _ = nets[team].act(to_device(stack_team([o], team)))
             acts[team] = a.cpu().numpy()
         o, _, done, info = eval_env.step(acts["seekers"], acts["hiders"])
         frames.append(draw_frame(eval_env))
@@ -304,7 +306,7 @@ def ppo_update(team, b, last_value):
     if n < 2:
         return {}
     to_t = lambda x, dtype=torch.float32: torch.as_tensor(x.reshape(T * E * N_AGENTS[team], *x.shape[3:])[keep], dtype=dtype, device=device)
-    g, m, v = to_t(b["grid"]), to_t(b["minimap"]), to_t(b["vec"])
+    o = {key: to_t(b[key]) for key in OBS_KEYS}
     actions = to_t(b["action"], torch.int64)
     old_logp, adv_t, ret_t = to_t(b["logp"]), to_t(adv), to_t(returns)
 
@@ -319,10 +321,8 @@ def ppo_update(team, b, last_value):
         perm = torch.randperm(n, device=device)
         # exactly MINIBATCHES chunks of (nearly) equal size, so no tiny leftover chunk
         for idx in torch.tensor_split(perm, cfg.MINIBATCHES):
-            logits, value = net(g[idx], m[idx], v[idx])
-            dist = torch.distributions.Categorical(logits=logits)
-            new_logp = dist.log_prob(actions[idx])
-            entropy = dist.entropy().mean()
+            new_logp, entropy, value = net.evaluate({key: x[idx] for key, x in o.items()}, actions[idx])
+            entropy = entropy.mean()
             a = adv_t[idx]
 
             # ratio = how much more (or less) likely the new policy makes this action than before
@@ -386,23 +386,22 @@ try:
             actions = {}
             for team in TEAMS:
                 n = N_AGENTS[team]
-                g, m, v = stack_team(obs, team)
-                g_t, m_t, v_t = (torch.as_tensor(x, device=device) for x in (g, m, v))
+                o_np = stack_team(obs, team)
+                o_t = to_device(o_np)
                 with torch.no_grad():
-                    a, logp, value = nets[team].act(g_t, m_t, v_t)
-                act = a.cpu().numpy().reshape(E, n)
+                    a, logp, value = nets[team].act(o_t)
+                act = a.cpu().numpy().reshape(E, n, 2)
 
                 # games where this team plays as a frozen past version: use the past network's actions
                 frozen_here = np.array([frozen_team[e] == team for e in range(E)])
                 if frozen_here.any():
                     with torch.no_grad():
-                        past_a, _, _ = past_nets[team].act(g_t, m_t, v_t)
-                    act = np.where(frozen_here[:, None], past_a.cpu().numpy().reshape(E, n), act)
+                        past_a, _, _ = past_nets[team].act(o_t)
+                    act = np.where(frozen_here[:, None, None], past_a.cpu().numpy().reshape(E, n, 2), act)
 
                 b = buf[team]
-                b["grid"][t] = g.reshape(E, n, N_CHANNELS, W, W)
-                b["minimap"][t] = m.reshape(E, n, N_MINIMAP_CHANNELS, MM, MM)
-                b["vec"][t] = v.reshape(E, n, 4)
+                for key in OBS_KEYS:
+                    b[key][t] = o_np[key].reshape((E, n) + OBS_SHAPES[key])
                 b["action"][t] = act
                 b["logp"][t] = logp.cpu().numpy().reshape(E, n)
                 b["value"][t] = value.cpu().numpy().reshape(E, n)
@@ -445,10 +444,8 @@ try:
         # ---------------- 2 + 3. advantages and PPO update, per team ----------------
         stats = {}
         for team in TEAMS:
-            g, m, v = stack_team(obs, team)
             with torch.no_grad():
-                _, _, last_value = nets[team].act(torch.as_tensor(g, device=device), torch.as_tensor(m, device=device),
-                                                  torch.as_tensor(v, device=device))
+                _, _, last_value = nets[team].act(to_device(stack_team(obs, team)))
             last_value = last_value.cpu().numpy().reshape(E, N_AGENTS[team])
             stats[team] = ppo_update(team, buf[team], last_value)
         update += 1

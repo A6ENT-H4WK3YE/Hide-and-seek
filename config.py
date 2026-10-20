@@ -3,14 +3,15 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v1.2"
+GAME_VERSION = "v2"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
 # 's' seeker spawn cell, 'A' 'B' 'C' site cells (every non-'#' cell is walkable)
 # Stage 1: maps/tiny.txt (11x11, fast debugging)
-# Stage 2: maps/three_sites.txt (45x31, FPS-style) -> raise MAX_STEPS to ~250,
-#          VISION_RANGE to ~7 and HIDING_PHASE to ~30 when you switch
+# Stage 2: maps/three_sites.txt (45x31, FPS-style) -> raise MAX_STEPS to ~250
+#          and HIDING_PHASE to ~30 when you switch
+# Every '#' cell becomes a solid 1 x 1 square; agents move freely (continuously) on the rest.
 MAP_FILE = "maps/tiny.txt"
 FIXED_EVAL_SEED = 0     # same spawns for every recorded GIF, for fair comparison
 
@@ -25,12 +26,18 @@ N_HIDERS = 1
 MAX_STEPS = 100         # time limit per round (discrete steps)
 HIDING_PHASE = 15       # seekers frozen for this many steps at the start
 
+# ---------- bodies and movement (1 unit = 1 map cell, 1 step = about 1 second) ----------
+AGENT_RADIUS = 0.3      # agents are circles 0.6 wide, so they fit through 1-wide corridors
+MOVE_SPEED = 1.0        # units per step, the same for forward, back and strafing
+MOVE_SUBSTEPS = 4       # each move is done in this many small pieces so nobody clips through a corner
+TURN_ANGLES = [-90, -30, -10, -3, 0, 3, 10, 30, 90]   # degrees per step; positive = clockwise on screen
+
 # ---------- vision and catching ----------
-VISION_RANGE = 5        # how far an agent can see (cells), walls block line of sight
-OBS_WINDOW = 11         # each agent sees a OBS_WINDOW x OBS_WINDOW square centred on itself
-                        # (must reach at least VISION_RANGE cells each way, or an agent can be
-                        #  spotted by an enemy it cannot observe; env.py checks this)
-CATCH_DISTANCE = 1      # caught if a seeker is within this many cells (1 = adjacent)
+VISION_CONE = 90        # degrees, centred on where the agent is looking; no range limit, walls block it
+N_RAYS = 31             # rays spread evenly across the cone (one every 3 degrees) describe the layout
+RAY_NORM = 20.0         # distances in observations are divided by this (keeps the numbers near 0 to 1)
+CATCH_DISTANCE = 0.8    # caught if a seeker's centre is within this distance of the hider's centre...
+CATCH_ANGLE = 30        # ...the hider is within this many degrees of where the seeker looks, and in sight
 MEMORY_DECAY = 0.9      # how fast each agent's own "last seen enemy" memory fades each step
 
 # ---------- team search memory and minimap ----------
@@ -39,15 +46,23 @@ SEARCH_MEMORY_STEPS = 10  # shared "searched recently" marks fade to 0 over this
 MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SIZE for every agent
 
 # ---------- rewards ----------
-# All rewards are shared by the whole team, and seekers always get minus what hiders get.
-REWARD_HIDDEN = 1.0     # per step: hiders +1 / seekers -1 when no hider is visible
-REWARD_SEEN = -1.0      # per step: hiders -1 / seekers +1 when any hider is visible
-REWARD_CATCH = 5.0      # per catch: seekers +5 / hiders -5
-REWARD_WIN = 10.0       # end of round: winning team +10, losing team -10
+# Written from the seekers' side. All rewards are shared by the whole team,
+# and hiders always get exactly minus what seekers get (zero-sum).
+# The per-step rewards are small, so following a hider without catching it never pays more than catching.
+REWARD_SEEN = 0.05      # per step a hider is in sight: seekers + REWARD_SEEN x closeness
+CLOSENESS_RANGE = 10.0  # closeness is 1 when touching, falling evenly to 0 at this distance
+REWARD_UNSEEN = -0.05   # per step no hider is in sight
+REWARD_CATCH = 10.0     # per catch
+REWARD_WIN = 10.0       # all hiders caught...
+REWARD_TIME_BONUS = 10.0  # ...plus up to this much more for the time left (earlier = bigger)
+REWARD_LOSS = -10.0     # hiders survive to the time limit
 
 # ---------- actions ----------
-# 0 stay, 1 up, 2 down, 3 left, 4 right
-N_ACTIONS = 5
+# every step each agent picks two things at once:
+#   move: 0 stay, 1 forward, 2 back, 3 strafe left, 4 strafe right (relative to where it looks)
+#   turn: an index into TURN_ANGLES
+N_MOVES = 5
+N_TURNS = len(TURN_ANGLES)
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
@@ -63,7 +78,7 @@ MINIBATCHES = 4         # each batch is split into this many chunks per pass
 ENT_COEF = 0.01         # bonus for keeping the policy random (exploration)
 VF_COEF = 0.5           # weight of the value (critic) loss
 MAX_GRAD_NORM = 0.5     # gradient clipping for stability
-HIDDEN = 256            # size of the network's hidden layer
+HIDDEN = 256            # size of the network's hidden layers
 DEVICE = "cpu"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU
 
 # ---------- opponent pool (stops self-play going round in circles) ----------

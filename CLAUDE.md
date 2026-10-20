@@ -46,18 +46,19 @@ agents playing in a 3D world. The goal can grow later.
 
 Roadmap:
 1. v1: grid world (done, see results)
-2. **v2: continuous space with cone vision (next, see spec below)**
+2. **v2: continuous space with cone vision (built on branch `v2-continuous`, first training run under way)**
 3. Walk vs run with sound (running is fast but makes noise; sound blocked by walls)
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
 6. Continuous time (positions follow differential equations)
 7. 3D render (the vision rays can drive a Wolfenstein-style 3D view)
 
-## Repo layout (current, grid version)
+## Repo layout (v2)
 
 ```
-config.py       all settings in one place (GAME_VERSION, rewards, training, pool, bots)
-env.py          the game: map, movement, line of sight, catches, rewards, observations
+config.py       all settings in one place (GAME_VERSION, bodies, vision, rewards, training, pool, bots)
+geometry.py     moving round agents among square walls (slide), casting rays (all at once, cell by cell)
+env.py          the game: movement, vision cones, catches, rewards, observations
 render.py       draws frames and GIFs
 model.py        TeamNet: one network per team, shared by teammates (parameter sharing)
 train.py        PPO self-play, opponent pool, run card, metrics, GIFs, checkpoints, bot benchmarks
@@ -175,8 +176,32 @@ is the stepping stone to the continuous-time version of the end goal.
 - **Git:** before starting, commit the current grid code and tag it `v1-grid`, then build v2 on a branch.
   Update `GAME_VERSION`, `formulation.md` (new v2 section and changelog), README and tests together.
 
-## Open decisions for v2
+## v2 decisions (made 2026-10-20)
 
-1. Turning: fixed set of 9 (recommended) or continuous now?
-2. Facing angle for a catch: 30 degrees either side?
-3. Catch distance and agent speed per step (suggest catch 0.8 units, speed 1 unit per step, agent radius 0.3).
+1. Turning: **fixed set of 9** (-90, -30, -10, -3, 0, +3, +10, +30, +90), as a second action head. Continuous turning
+   is a later experiment.
+2. Catch: within **0.8** units centre to centre, hider within **30 degrees** of where the seeker looks, **and in sight**
+   (clear straight line).
+3. Agent radius **0.3**, speed **1 unit per step** for forward, back and strafing alike. Moves are done in 4 pieces.
+4. Smaller choices made while building (Moeez said "rest what you think is best"):
+   - agents do not block each other (they can overlap), as in the grid version
+   - turn first, then move; seekers frozen in the hiding phase means no moving and no turning
+   - closeness = 1 - distance / 10 (clipped at 0), and the best seeing pair counts
+   - the 11 x 11 close-up is dropped (rays replace it); the personal "last seen enemy" memory stays on the minimap
+   - enemy slots padded to `MAX_TEAM_SIZE` (5) so bigger teams work later
+   - rays stop at bodies as well as walls; "searched" marks the map cells the rays pass over (up to the wall)
+   - sight is one-way now (a seeker can see a hider's back), accepted as FPS-like, documented in formulation.md
+
+## v2 as built (branch `v2-continuous`)
+
+- `test_env.py` has 40 checks: exact wall contact and sliding, no wall overlap in random play, rays exact,
+  no seeing through corner gaps, one-way sight, cone edges, catch rules, every reward number, the anti-farming check
+  (watching a hider for a whole round is worth about -7 to seekers, catching it about +30), observations, team memory.
+- Speed: vision 0.5 ms per step for 3 agents; random play about 2,000 game steps/s; training about the same as the grid
+  2v1 (smoke run reached 717 steps/s including the one-off bot measurements, still climbing).
+- Bots rewritten: they plan on the grid of cells underneath, then turn and walk. The chaser wanders to random spots when
+  it has no target; the fleeing hider waits still while looking around, then backs away from a seeker while facing it.
+- v2 reference numbers (2v1 tiny, 300 games, seekers' win rate): random v random 20%, chaser v random hider 89%,
+  chaser v fleeing bot 74%, random seekers v fleeing bot 4%. Not comparable with the grid bot numbers.
+- Bug found while building: pushing a body out of wall squares one by one made the seam between two squares of a flat
+  wall act like a corner, nudging agents sideways. Fixed by pushing out of the closest square first.

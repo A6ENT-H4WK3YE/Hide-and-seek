@@ -13,6 +13,7 @@ import numpy as np
 import config as cfg
 from env import HideSeekEnv
 from render import draw_frame, save_gif
+from matches import random_actions as random_pairs
 
 map_file = sys.argv[1] if len(sys.argv) > 1 else cfg.MAP_FILE
 n_seekers = int(sys.argv[2]) if len(sys.argv) > 2 else cfg.N_SEEKERS
@@ -21,12 +22,12 @@ n_rounds = 300
 
 t0 = time.time()
 env = HideSeekEnv(map_file)
-print(f"map {map_file} ({env.W} x {env.H}), line of sight table built in {time.time() - t0:.1f}s")
+print(f"map {map_file} ({env.W} x {env.H}), loaded in {time.time() - t0:.1f}s")
 rng = np.random.default_rng(0)
 
 
 def random_actions(n):
-    return rng.integers(0, cfg.N_ACTIONS, size=n)
+    return random_pairs(rng, n)
 
 
 # ---------- 1. one recorded round ----------

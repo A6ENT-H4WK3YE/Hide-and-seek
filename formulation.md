@@ -5,6 +5,78 @@ time, the game moves on according to their joint action, and each agent only see
 is going on. This file says exactly which game each version is. `GAME_VERSION` in `config.py`
 points to a section here, and every training run's `run_card.md` records it.
 
+## v2: continuous space, 90 degree cone, catch by distance and facing, anti-farming rewards
+
+The current version. Same kind of game as v1 (two-team zero-sum POSG, 2 seekers v 1 hider by default),
+but played in continuous space. The grid version is kept in git under the tag `v1-grid`.
+
+### State
+- every agent's position (x, y), real numbers, and heading (the direction it looks, any angle)
+- which hiders are still alive, and the step count t
+- The map is fixed background: every `#` cell of the map file is a solid 1 x 1 square.
+  1 unit = 1 map cell, 1 step = about 1 second.
+
+### Actions
+Every step each agent picks two things at once (two separate choices, from two heads of its network):
+- **move:** stay, forward, back, strafe left, strafe right (relative to where it looks), 1 unit per step for all of them
+- **turn:** one of -90, -30, -10, -3, 0, +3, +10, +30, +90 degrees. The biggest turn is 90 degrees, so turning round takes
+  2 steps: that is what makes flanking and attacking from behind worth something.
+- So 5 x 9 = 45 possible (move, turn) pairs per agent.
+
+### Transitions
+- Each agent turns first, then moves. Agents are circles of radius 0.3. A move is done in 4 small pieces; after each
+  piece the agent is pushed out of any wall it overlaps, so it slides along walls instead of stopping dead, and can never
+  pass through a wall or a corner gap.
+- Agents do not block each other (they can overlap), as in the grid version.
+- Seekers are frozen (no moving, no turning) during the hiding phase. Caught hiders leave the game.
+
+### Vision
+- Each agent sees a **90 degree cone** centred on its heading, with no range limit, blocked by walls.
+- **Enemies:** an enemy is seen if the straight line between the two centres touches no wall and the enemy's centre is
+  inside the viewer's cone. This is checked exactly, so nobody can slip between rays. A line passing exactly through the
+  point where two walls touch counts as blocked (no seeing through corner gaps).
+- **Sight is no longer two-way.** A seeker can see a hider's back while the hider cannot see it. This is intended
+  (it is how an FPS works), but it means a hider can lose reward because of a seeker it cannot observe.
+- **Rays:** 31 rays, one every 3 degrees across the cone, each stopping at the first wall or the first body it hits.
+  They describe the layout around the agent (they are what the network "looks at").
+
+### Catch
+A hider is caught when a seeker (not frozen) has it in sight, their centres are at most 0.8 apart, and the hider is
+within 30 degrees either side of where the seeker looks. So the seeker has to actually face the hider.
+
+### Rewards (shared by the whole team)
+Written from the seekers' side; hiders always get exactly minus this (zero-sum).
+
+| Event | Seekers |
+|---|---|
+| hiding phase step | 0 |
+| a hider is in sight | +0.05 x closeness (1 when touching, falling evenly to 0 at 10 units; the best pair counts) |
+| no hider in sight | -0.05 |
+| each catch | +10 |
+| all hiders caught | +10, plus up to +10 for time left (10 x steps left / hunting steps) |
+| hiders survive to the time limit | -10 |
+
+- **Why (fixes the farming exploit):** in v1 seekers got +1 every step they could see a hider, and catching ended the round,
+  so following a hider for about 26 steps or more paid more than catching it. Now the per-step rewards are tiny next to a
+  catch: watching a hider 3 units away for a whole round is worth about -7 to the seekers, catching it at once about +30
+  (checked in `test_env.py`).
+- Closeness only counts while a hider is seen. Hiders are not rewarded for distance while unseen: they could not observe
+  it, and it would teach running to corners instead of hiding.
+
+### Observations
+Each agent gets four things:
+1. **rays** (31 x 4): for each ray, its length (divided by 20) and whether it hit a wall, a teammate or an enemy
+2. **enemies** (5 x 4): enemies it can see right now, nearest first: a "seen" flag, the direction relative to where it
+   looks (as cos and sin) and the distance (divided by 20). Empty slots are 0. 5 slots so team sizes can grow later.
+3. **6 numbers:** its position (scaled to 0 to 1), its heading (cos and sin), the fraction of the round gone, hiding phase
+4. **minimap** (5 x 12 x 12), as in v1.2: walls, me, teammates, team "searched recently" and my own "last seen enemy" memory.
+   "Searched" now means inside one of the team's cones (map cells the rays pass over), fading to 0 over 10 steps.
+
+The v1 11 x 11 close-up is gone: the rays replace it.
+
+### End of round and discount
+Unchanged: the round ends when all hiders are caught or after 100 steps (15 of them the hiding phase). Discount 0.99.
+
 ## v1: 360 degree vision, adjacent catch, team rewards with win/loss bonus
 
 (The last grid version is v1.2, see the changelog: same rules and rewards, richer observations.)
@@ -99,6 +171,19 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
 - **What stays individual:** each agent's "last seen enemy" memory is still its own, not shared.
 - **Also decided:** the seekers' -1 per step while no hider is visible stays. It depends only on whether a hider
   is visible, not on movement, so there is no way to dodge it except finding the hider.
+
+### v2: continuous space with cone vision (replaces the grid)
+- **What changed:** everything about the world. Continuous positions and headings, a 90 degree cone instead of 360
+  degree vision with range 5, exact enemy sight, catching by distance and facing, two-part actions (move and turn),
+  new rewards, rays instead of the close-up grid. The full definition is in the v2 section above.
+- **Why:** the grid was not FPS-like: all-round vision with a made-up range limit, no facing (so no flanking),
+  sight leaking through corner gaps, blocky movement. Continuous space is also the step towards continuous time.
+  The rewards change fixes the farming exploit (see the v2 rewards).
+- **Kept:** 2v1 on the tiny map, hiding phase, team search memory and minimap, opponent pool, bots (rewritten to steer).
+- **Benchmark bots in v2:** the chaser now wanders to random spots instead of moving randomly, and the fleeing hider waits
+  still while looking around, then backs away from a seeker while facing it. Reference numbers, 2v1 tiny, 300 games:
+  random v random 20%, chaser v random hider 89%, chaser v fleeing bot 74%, random seekers v fleeing bot 4%.
+  These are not comparable with the grid bot numbers.
 
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.

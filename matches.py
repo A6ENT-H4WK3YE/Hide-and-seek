@@ -8,15 +8,18 @@ import numpy as np
 import torch
 import config as cfg
 from render import draw_frame, save_gif
+from model import obs_to_tensors
 
 
 def trained_actions(net, obs_team, device):
-    g = torch.as_tensor(np.stack([o["grid"] for o in obs_team]), device=device)
-    m = torch.as_tensor(np.stack([o["minimap"] for o in obs_team]), device=device)
-    v = torch.as_tensor(np.stack([o["vec"] for o in obs_team]), device=device)
     with torch.no_grad():
-        a, _, _ = net.act(g, m, v)
+        a, _, _ = net.act(obs_to_tensors(obs_team, device))
     return a.cpu().numpy()
+
+
+def random_actions(rng, n):
+    # one random (move, turn) pair per agent
+    return np.stack([rng.integers(0, cfg.N_MOVES, size=n), rng.integers(0, cfg.N_TURNS, size=n)], axis=1)
 
 
 def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=None):
@@ -36,7 +39,7 @@ def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=N
                 elif policies[team] == "bot":
                     acts[team] = bots.seeker_actions() if team == "seekers" else bots.hider_actions()
                 else:
-                    acts[team] = rng.integers(0, cfg.N_ACTIONS, size=len(obs[team]))
+                    acts[team] = random_actions(rng, len(obs[team]))
             obs, _, done, info = env.step(acts["seekers"], acts["hiders"])
             if not info["hiding_phase"]:
                 hunting += 1

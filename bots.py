@@ -1,24 +1,33 @@
 # Hand-written players used as fixed benchmarks. Unlike self-play opponents they never change,
 # so "how do my trained agents do against the bots" is a fair way to measure progress over time.
 #
-#   chaser seeker:  if it sees a hider, walks the shortest path towards it; if it loses sight,
-#                   goes to where it last saw the hider; otherwise wanders randomly.
-#   fleeing hider:  if it sees a seeker (or saw one in the last few steps), moves to the cell that
-#                   is furthest away along walkable paths; otherwise stays still.
+#   chaser seeker:  if it sees a hider, heads straight for it, looking at it, and catches it; if it loses
+#                   sight, goes to where it last saw the hider; otherwise walks to random spots on the map,
+#                   looking where it is going.
+#   fleeing hider:  if it sees a seeker (or saw one in the last few steps), backs away to wherever is
+#                   furthest along walkable paths, while still facing the seeker; otherwise stays put and
+#                   slowly looks around.
 #
-# Both only use what a real agent could know: what is in their own line of sight, plus their own memory.
+# Both only use what a real agent could know: what is inside their own cone, plus their own memory.
+# Routes are planned on the grid of map cells underneath (shortest walking distance between cells),
+# then followed in continuous space by turning and walking.
 #
 # Usage:
 #   bots = Bots(env)
 #   bots.reset()                 after every env.reset()
-#   bots.seeker_actions()        one action per seeker
-#   bots.hider_actions()         one action per hider
+#   bots.seeker_actions()        one (move, turn) pair per seeker
+#   bots.hider_actions()         one (move, turn) pair per hider
 
 from collections import deque
 import numpy as np
-from env import MOVES
+import config as cfg
+from env import MOVES, TURNS, NO_TURN, cell_of
+from geometry import line_clear, wrap_angle
 
-FLEE_MEMORY = 10    # a fleeing hider keeps running from a seeker it saw up to this many steps ago
+FLEE_MEMORY = 10      # a fleeing hider keeps running from a seeker it saw up to this many steps ago
+WANDER_STEPS = 30     # a wandering seeker picks a new random spot after this many steps, even if not there yet
+SCAN_TURN = cfg.TURN_ANGLES.index(30)    # a waiting hider turns this way each step to look around
+STEPS4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
 
 
 class Bots:
@@ -28,11 +37,8 @@ class Bots:
         self.rng = np.random.default_rng(seed)
         # shortest walking distance between every pair of floor cells, worked out once per map
         H, W = env.H, env.W
-        self.dist = {}
-        for y in range(H):
-            for x in range(W):
-                if not env.walls[y, x]:
-                    self.dist[(y, x)] = self._bfs((y, x))
+        self.floor = [(y, x) for y in range(H) for x in range(W) if not env.walls[y, x]]
+        self.dist = {c: self._bfs(c) for c in self.floor}
 
     def _bfs(self, src):
         env = self.env
@@ -41,7 +47,7 @@ class Bots:
         queue = deque([src])
         while queue:
             y, x = queue.popleft()
-            for dy, dx in MOVES.values():
+            for dy, dx in STEPS4:
                 ny, nx = y + dy, x + dx
                 if 0 <= ny < env.H and 0 <= nx < env.W and not env.walls[ny, nx] and d[ny, nx] == 10_000:
                     d[ny, nx] = d[y, x] + 1
@@ -50,53 +56,105 @@ class Bots:
 
     def reset(self):
         self.seeker_target = [None] * self.env.n_seekers     # where each seeker last saw a hider
+        self.seeker_wander = [None] * self.env.n_seekers     # (random spot, steps spent going there)
         self.hider_threat = [None] * self.env.n_hiders       # (position, steps ago) of the last seeker seen
 
-    def _best_move(self, pos, score):
-        # try every action, keep the one(s) with the highest score, break ties randomly
-        scores = []
-        for a, (dy, dx) in MOVES.items():
-            y, x = pos[0] + dy, pos[1] + dx
-            if self.env.walls[y, x]:
-                y, x = pos
-            scores.append(score((y, x)))
-        scores = np.array(scores)
-        return int(self.rng.choice(np.flatnonzero(scores == scores.max())))
+    # ---------- steering ----------
+    def _route(self, pos, target):
+        # direction to walk from pos towards target: straight there if the line is clear,
+        # otherwise towards the centre of the next cell on the shortest grid path
+        if line_clear(self.env.walls, pos[0], pos[1], target[0], target[1]):
+            goal = target
+        else:
+            here = cell_of(pos)
+            d = self.dist[cell_of(target)]
+            best = min(self._neighbours(here), key=lambda c: d[c])
+            goal = (best[1] + 0.5, best[0] + 0.5)
+        return np.arctan2(goal[1] - pos[1], goal[0] - pos[0])
 
+    def _neighbours(self, cell):
+        y, x = cell
+        cells = [cell]
+        for dy, dx in STEPS4:
+            if not self.env.walls[y + dy, x + dx]:
+                cells.append((y + dy, x + dx))
+        return cells
+
+    def _turn_towards(self, heading, angle):
+        # the turn action that leaves the agent looking closest to angle
+        return int(np.argmin(np.abs(wrap_angle(angle - (heading + TURNS)))))
+
+    def _move_towards(self, heading, angle):
+        # the move (forward, back, strafe left / right) closest to the wanted direction
+        best, best_dot = 0, -2.0
+        for m, (fwd, right) in MOVES.items():
+            if m == 0:
+                continue
+            move_angle = heading + np.arctan2(right, fwd)
+            dot = np.cos(wrap_angle(angle - move_angle))
+            if dot > best_dot:
+                best, best_dot = m, dot
+        return best
+
+    # ---------- seekers ----------
     def seeker_actions(self):
         env = self.env
         actions = []
         for i in range(env.n_seekers):
-            pos = tuple(env.seekers[i])
-            visible = [tuple(env.hiders[j]) for j in np.where(env.seeker_sees[i])[0]]
+            pos, heading = env.seekers[i], env.seeker_heading[i]
+            visible = [env.hiders[j] for j in np.where(env.seeker_sees[i])[0]]
             if visible:
-                self.seeker_target[i] = min(visible, key=lambda h: self.dist[pos][h])
-            elif self.seeker_target[i] == pos:
+                self.seeker_target[i] = min(visible, key=lambda h: np.hypot(*(h - pos))).copy()
+                self.seeker_wander[i] = None
+            elif self.seeker_target[i] is not None and np.hypot(*(self.seeker_target[i] - pos)) < 0.5:
                 self.seeker_target[i] = None      # reached the last known spot, nobody there
+
             target = self.seeker_target[i]
             if target is None:
-                actions.append(int(self.rng.integers(0, 5)))
-            else:
-                actions.append(self._best_move(pos, lambda c: -self.dist[c][target]))
+                # wander: walk to a random spot, pick a new one when there (or after a while)
+                spot = self.seeker_wander[i]
+                if spot is None or spot[1] >= WANDER_STEPS or np.hypot(*(spot[0] - pos)) < 0.5:
+                    y, x = self.floor[self.rng.integers(len(self.floor))]
+                    spot = (np.array([x + 0.5, y + 0.5]), 0)
+                self.seeker_wander[i] = (spot[0], spot[1] + 1)
+                target = spot[0]
+
+            want = self._route(pos, target)
+            turn = self._turn_towards(heading, want)
+            new_heading = heading + TURNS[turn]
+            close_enough = visible and np.hypot(*(target - pos)) <= 0.9 * cfg.CATCH_DISTANCE
+            facing = abs(wrap_angle(want - new_heading)) < np.radians(50)
+            move = 1 if (facing and not close_enough) else 0
+            actions.append([move, turn])
         return np.array(actions)
 
+    # ---------- hiders ----------
     def hider_actions(self):
         env = self.env
         actions = []
         for j in range(env.n_hiders):
-            pos = tuple(env.hiders[j])
+            pos, heading = env.hiders[j], env.hider_heading[j]
             if not env.hider_alive[j]:
-                actions.append(0)
+                actions.append([0, NO_TURN])
                 continue
-            visible = [tuple(env.seekers[i]) for i in np.where(env.hider_sees[j])[0]]
+            visible = [env.seekers[i] for i in np.where(env.hider_sees[j])[0]]
             if visible:
-                self.hider_threat[j] = (min(visible, key=lambda s: self.dist[pos][s]), 0)
+                self.hider_threat[j] = (min(visible, key=lambda s: np.hypot(*(s - pos))).copy(), 0)
             elif self.hider_threat[j] is not None:
                 spot, age = self.hider_threat[j]
                 self.hider_threat[j] = (spot, age + 1) if age + 1 <= FLEE_MEMORY else None
+
             if self.hider_threat[j] is None:
-                actions.append(0)
-            else:
-                threat = self.hider_threat[j][0]
-                actions.append(self._best_move(pos, lambda c: self.dist[c][threat]))
+                actions.append([0, SCAN_TURN])      # nothing to run from: stay and look around
+                continue
+            threat = self.hider_threat[j][0]
+            # head for the neighbouring cell that is furthest (walking) from the threat
+            d = self.dist[cell_of(threat)]
+            best = max(self._neighbours(cell_of(pos)), key=lambda c: d[c])
+            goal = np.array([best[1] + 0.5, best[0] + 0.5])
+            away = np.arctan2(goal[1] - pos[1], goal[0] - pos[0])
+            # keep looking at the threat while backing away
+            turn = self._turn_towards(heading, np.arctan2(threat[1] - pos[1], threat[0] - pos[0]))
+            move = self._move_towards(heading + TURNS[turn], away) if np.hypot(*(goal - pos)) > 0.1 else 0
+            actions.append([move, turn])
         return np.array(actions)

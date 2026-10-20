@@ -1,4 +1,4 @@
-# Draw the game as images and save GIFs.
+# Draw the game as images and save GIFs: walls, vision cones, agents and where they look.
 #
 #   frame = draw_frame(env)            -> RGB numpy array of the current state
 #   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF
@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon, Circle
 from PIL import Image
 import config as cfg
 
@@ -36,47 +37,46 @@ def base_image(env):
 
 def draw_frame(env, show_vision=True):
     img = base_image(env)
-
-    # shade what each team can currently see
-    if show_vision:
-        seeker_view = np.zeros((env.H, env.W), dtype=bool)
-        for p in env.seekers:
-            seeker_view |= env.view_of(p)
-        hider_view = np.zeros((env.H, env.W), dtype=bool)
-        for j, p in enumerate(env.hiders):
-            if env.hider_alive[j]:
-                hider_view |= env.view_of(p)
-        img[hider_view] = 0.8 * img[hider_view] + 0.2 * HIDER_VIEW
-        img[seeker_view] = 0.7 * img[seeker_view] + 0.3 * SEEKER_VIEW
-
     cell = 0.45 if env.W <= 15 else 0.22
     fig, ax = plt.subplots(figsize=(env.W * cell + 0.6, env.H * cell + 1.0), dpi=100)
     fig.patch.set_facecolor(BG)
-    ax.imshow(img, interpolation="nearest")
+    # map cell (row r, column c) covers x from c to c+1 and y from r to r+1, the same units the game uses
+    ax.imshow(img, interpolation="nearest", extent=(0, env.W, env.H, 0))
 
     # thin grid lines on small maps so cells are easy to count
     if env.W <= 15:
         for k in range(env.W + 1):
-            ax.axvline(k - 0.5, color=BG, linewidth=0.4)
+            ax.axvline(k, color=BG, linewidth=0.4)
         for k in range(env.H + 1):
-            ax.axhline(k - 0.5, color=BG, linewidth=0.4)
+            ax.axhline(k, color=BG, linewidth=0.4)
+
+    # vision cones: the agent's position plus the end of every ray (where it hits a wall)
+    ns = env.n_seekers
+    if show_vision:
+        for j in range(env.n_hiders):
+            if env.hider_alive[j]:
+                ax.add_patch(Polygon(env.cone_polygon(ns + j), closed=True, facecolor=HIDER_VIEW, alpha=0.22, linewidth=0))
+        for i in range(ns):
+            ax.add_patch(Polygon(env.cone_polygon(i), closed=True, facecolor=SEEKER_VIEW, alpha=0.28, linewidth=0))
 
     # dashed lines: which seeker can see which hider
-    for i in range(env.n_seekers):
+    for i in range(ns):
         for j in range(env.n_hiders):
             if env.seeker_sees[i, j]:
-                (y0, x0), (y1, x1) = env.seekers[i], env.hiders[j]
+                (x0, y0), (x1, y1) = env.seekers[i], env.hiders[j]
                 ax.plot([x0, x1], [y0, y1], "--", color=SEEKER_COL, linewidth=1.2)
 
-    # agents
-    size = 260 if env.W <= 15 else 70
-    for p in env.seekers:
-        ax.scatter(p[1], p[0], s=size, color=SEEKER_COL, edgecolors="white", linewidths=1.2, zorder=3)
-    for j, p in enumerate(env.hiders):
-        if env.hider_alive[j]:
-            ax.scatter(p[1], p[0], s=size, color=HIDER_COL, edgecolors="white", linewidths=1.2, zorder=3)
-        else:
-            ax.scatter(p[1], p[0], s=size, color="#777777", marker="X", zorder=3)
+    # agents: a circle the size of their body, and a short line showing where they look
+    r = cfg.AGENT_RADIUS
+    for team, positions, headings, colour in [("seekers", env.seekers, env.seeker_heading, SEEKER_COL),
+                                              ("hiders", env.hiders, env.hider_heading, HIDER_COL)]:
+        for k, (p, h) in enumerate(zip(positions, headings)):
+            if team == "hiders" and not env.hider_alive[k]:
+                ax.scatter(p[0], p[1], s=120 if env.W <= 15 else 40, color="#777777", marker="X", zorder=3)
+                continue
+            ax.add_patch(Circle((p[0], p[1]), r, facecolor=colour, edgecolor="white", linewidth=1.0, zorder=3))
+            ax.plot([p[0], p[0] + 2.2 * r * np.cos(h)], [p[1], p[1] + 2.2 * r * np.sin(h)],
+                    color="white", linewidth=1.4, zorder=4)
 
     # title: time, phase, whether hiders are spotted
     if env.t < cfg.HIDING_PHASE:
@@ -89,6 +89,8 @@ def draw_frame(env, show_vision=True):
     if env.done:
         title += f"   -> {env.winner.upper()} WIN"
     ax.set_title(title, color="#d9d4c7", fontsize=8)
+    ax.set_xlim(0, env.W)
+    ax.set_ylim(env.H, 0)
     ax.axis("off")
     plt.tight_layout()
 

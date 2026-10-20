@@ -1,38 +1,63 @@
 # Quick checks that the game rules work. Run:  python test_env.py
-# Uses a tiny hand-made map so every answer is easy to work out by hand.
+# Uses tiny hand-made maps so every answer is easy to work out by hand.
+# Positions are (x, y) with y pointing down; headings in degrees (0 = east, 90 = south, 180 = west).
 
 import os
+import time
 import tempfile
 import numpy as np
 import config as cfg
-from env import HideSeekEnv, compute_visibility, N_CHANNELS, N_MINIMAP_CHANNELS, CH_SEARCHED, MM_ME, MM_TEAMMATES, MM_SEARCHED
+from env import (HideSeekEnv, NO_TURN, HIT_WALL, HIT_TEAMMATE, HIT_ENEMY, N_MINIMAP_CHANNELS,
+                 RAY_FEATURES, ENEMY_FEATURES, VEC_DIM, MM_ME, MM_SEARCHED)
+from geometry import overlaps_wall
 
 TEST_MAP = """\
 ###########
 #h..#....s#
 #.........#
+#.........#
 ###########
 """
-# row 1: a wall at column 4 sits between the left and right halves
-# row 2: completely open
+# row 1: a wall at column 4 (x from 4 to 5, y from 1 to 2) splits the top row in two
+# rows 2 and 3: completely open
+
+# two walls touching only at a corner, at the point (2, 2): (1, 1) and (2, 2) are floor on either side
+CORNER_MAP = """\
+#####
+#s#h#
+##..#
+#...#
+#####
+"""
+
+STAY = [0, NO_TURN]
+FORWARD = [1, NO_TURN]
+TURN_90 = cfg.TURN_ANGLES.index(90)
 
 
-def make_env():
+def make_env(text, n_seekers=1, n_hiders=1):
     path = os.path.join(tempfile.mkdtemp(), "test_map.txt")
     with open(path, "w") as f:
-        f.write(TEST_MAP)
+        f.write(text)
     env = HideSeekEnv(path)
-    env.reset(seed=0, n_seekers=1, n_hiders=1)
+    env.reset(seed=0, n_seekers=n_seekers, n_hiders=n_hiders)
     return env
 
 
-def place(env, seeker, hider, t=None):
-    env.seekers = np.array([seeker])
-    env.hiders = np.array([hider])
-    env.hider_alive[:] = True
+def place(env, seekers, hiders, t=None):
+    # seekers / hiders: lists of (x, y, heading in degrees)
+    env.seekers = np.array([[x, y] for x, y, _ in seekers], dtype=float)
+    env.seeker_heading = np.radians([h for _, _, h in seekers])
+    env.hiders = np.array([[x, y] for x, y, _ in hiders], dtype=float)
+    env.hider_heading = np.radians([h for _, _, h in hiders])
+    env.n_seekers, env.n_hiders = len(seekers), len(hiders)
+    env.hider_alive = np.ones(len(hiders), dtype=bool)
+    env.seeker_memory = np.zeros((len(seekers), env.H, env.W), dtype=np.float32)
+    env.hider_memory = np.zeros((len(hiders), env.H, env.W), dtype=np.float32)
+    env.done, env.winner = False, None
     if t is not None:
         env.t = t
-    env._update_vision()
+    env._update_sight()
 
 
 def check(name, condition):
@@ -40,95 +65,199 @@ def check(name, condition):
     assert condition, name
 
 
-env = make_env()
+def close(a, b, tol=1e-6):
+    return abs(a - b) < tol
 
-# --- line of sight ---
-place(env, seeker=(1, 7), hider=(1, 2))
+
+env = make_env(TEST_MAP)
+HUNT = cfg.HIDING_PHASE   # any step from here on is the hunting phase
+
+# ======================================================================
+# movement
+# ======================================================================
+place(env, seekers=[(8.5, 3.5, 0)], hiders=[(2.5, 1.5, 0)], t=HUNT)
+for _ in range(3):
+    env.step([STAY], [FORWARD])     # hider walks east into the wall at x = 4
+check(f"walking into a wall stops exactly one radius short (x = {env.hiders[0, 0]:.4f}, expected {4 - cfg.AGENT_RADIUS})",
+      close(env.hiders[0, 0], 4 - cfg.AGENT_RADIUS) and close(env.hiders[0, 1], 1.5))
+
+place(env, seekers=[(8.5, 3.5, 0)], hiders=[(6.5, 1.5, -45)], t=HUNT)
+env.step([STAY], [FORWARD])         # diagonally up-right into the top wall: should slide along it
+expected_x = 6.5 + cfg.MOVE_SPEED * np.cos(np.radians(45))
+check(f"moving at an angle into a wall slides along it (x {env.hiders[0, 0]:.3f}, y {env.hiders[0, 1]:.3f})",
+      close(env.hiders[0, 1], 1 + cfg.AGENT_RADIUS) and close(env.hiders[0, 0], expected_x))
+
+place(env, seekers=[(8.5, 3.5, 0)], hiders=[(2.5, 2.5, 30)], t=HUNT)
+for _ in range(4):
+    env.step([STAY], [[0, TURN_90]])
+check("four 90 degree turns face the same way again", close(np.degrees(env.hider_heading[0]), 30))
+
+env.reset(seed=0, n_seekers=1, n_hiders=1)
+start, start_heading = env.seekers[0].copy(), env.seeker_heading[0]
+env.step([[1, TURN_90]], [STAY])
+check("seekers frozen during hiding phase (no moving, no turning)",
+      np.allclose(env.seekers[0], start) and env.seeker_heading[0] == start_heading)
+
+tiny = HideSeekEnv("maps/tiny.txt")
+rng = np.random.default_rng(1)
+bad, steps = 0, 0
+for k in range(20):
+    tiny.reset(seed=k, n_seekers=2, n_hiders=1)
+    done = False
+    while not done:
+        _, _, done, _ = tiny.step(np.stack([rng.integers(0, cfg.N_MOVES, 2), rng.integers(0, cfg.N_TURNS, 2)], axis=1),
+                                  np.stack([rng.integers(0, cfg.N_MOVES, 1), rng.integers(0, cfg.N_TURNS, 1)], axis=1))
+        steps += 1
+        for p in np.concatenate([tiny.seekers, tiny.hiders]):
+            bad += overlaps_wall(tiny.walls, p[0], p[1], cfg.AGENT_RADIUS)
+check(f"random play on the tiny map never overlaps a wall ({steps} steps)", bad == 0)
+
+# ======================================================================
+# vision
+# ======================================================================
+mid = cfg.N_RAYS // 2   # the ray straight ahead
+place(env, seekers=[(2.5, 2.5, 0)], hiders=[(1.5, 1.5, 0)])
+check(f"straight-ahead ray stops at the east wall (distance {env.ray_dist[0, mid]:.4f}, expected 7.5)",
+      close(env.ray_dist[0, mid], 7.5) and env.ray_hit[0, mid] == HIT_WALL)
+
+place(env, seekers=[(7.5, 1.5, 180)], hiders=[(2.5, 1.5, 0)])
 check("wall between them blocks sight", not env.seeker_sees[0, 0])
 
-place(env, seeker=(2, 6), hider=(2, 2))
-check("open row: they can see each other", env.seeker_sees[0, 0])
-check("sight works both ways", env.hider_sees[0, 0])
+place(env, seekers=[(7.5, 2.5, 180)], hiders=[(2.5, 2.5, 0)])
+check("open row, facing each other: both see each other", env.seeker_sees[0, 0] and env.hider_sees[0, 0])
 
-place(env, seeker=(2, 9), hider=(2, 1))
-check(f"too far apart (8 cells, range {cfg.VISION_RANGE}): not visible", not env.seeker_sees[0, 0])
+place(env, seekers=[(7.5, 2.5, 0)], hiders=[(2.5, 2.5, 0)])
+check("hider behind the seeker (outside the cone): not seen", not env.seeker_sees[0, 0])
 
-# --- movement ---
-place(env, seeker=(2, 9), hider=(1, 3), t=cfg.HIDING_PHASE)
-env.step([0], [4])  # hider tries to move right into the wall at (1, 4)
-check("walls block movement", tuple(env.hiders[0]) == (1, 3))
+place(env, seekers=[(7.5, 2.5, 180)], hiders=[(2.5, 2.5, 180)])
+check("sight is one-way: the seeker sees the hider's back, the hider cannot see the seeker",
+      env.seeker_sees[0, 0] and not env.hider_sees[0, 0])
 
-# --- hiding phase ---
-env.reset(seed=0, n_seekers=1, n_hiders=1)
-start = tuple(env.seekers[0])
-env.step([3], [0])  # seeker tries to move left on step 0
-check("seekers frozen during hiding phase", tuple(env.seekers[0]) == start)
+for angle, seen in [(40, True), (50, False)]:
+    hx, hy = 2.5 + 1.8 * np.cos(np.radians(angle)), 2.5 + 1.8 * np.sin(np.radians(angle))
+    place(env, seekers=[(2.5, 2.5, 0)], hiders=[(hx, hy, 0)])
+    check(f"hider {angle} degrees off to the side is {'inside' if seen else 'outside'} the 90 degree cone",
+          bool(env.seeker_sees[0, 0]) == seen)
 
-# --- catching ---
-env.reset(seed=0, n_seekers=1, n_hiders=1)
-place(env, seeker=(2, 4), hider=(2, 2), t=cfg.HIDING_PHASE)
-obs, rewards, done, info = env.step([3], [0])  # seeker steps left, now next to the hider
-check("adjacent seeker catches the hider", not env.hider_alive[0])
+place(env, seekers=[(2.5, 2.5, 0), (5.5, 2.5, 0)], hiders=[(1.5, 1.5, 0)])
+check(f"a ray that hits a teammate says teammate, at the edge of its body (distance {env.ray_dist[0, mid]:.2f})",
+      env.ray_hit[0, mid] == HIT_TEAMMATE and close(env.ray_dist[0, mid], 3 - cfg.AGENT_RADIUS))
+place(env, seekers=[(2.5, 2.5, 0)], hiders=[(5.5, 2.5, 0)])
+check("a ray that hits an enemy says enemy", env.ray_hit[0, mid] == HIT_ENEMY)
+
+corner = make_env(CORNER_MAP)
+place(corner, seekers=[(1.5, 1.5, 45)], hiders=[(2.5, 2.5, 225)])
+check(f"a ray exactly through a corner where two walls touch stops there (distance {corner.ray_dist[0, mid]:.4f})",
+      close(corner.ray_dist[0, mid], np.sqrt(0.5)))
+check("no seeing through the corner gap between two touching walls",
+      not corner.seeker_sees[0, 0] and not corner.hider_sees[0, 0])
+
+tiny.reset(seed=0, n_seekers=2, n_hiders=1)
+t0 = time.time()
+for _ in range(1000):
+    tiny._update_sight()
+ms = (time.time() - t0)
+check(f"vision speed: {ms:.2f} ms per step for 3 agents on the tiny map (under 2 ms)", ms < 2.0)
+
+# ======================================================================
+# catching
+# ======================================================================
+place(env, seekers=[(3.2, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+_, rewards, done, info = env.step([STAY], [STAY])
+check("close, facing the hider, nothing in between: caught", not env.hider_alive[0])
 check("round ends when all hiders are caught", done and info["winner"] == "seekers")
-check("catch bonus goes to seekers", rewards["seekers"][0] > 0 and rewards["hiders"][0] < 0)
-expected = cfg.REWARD_SEEN - cfg.REWARD_CATCH - cfg.REWARD_WIN   # -1 - 5 - 10 = -16 for hiders
-check(f"final catch: hiders get seen + catch + loss = {expected}", rewards["hiders"][0] == expected)
-check("zero-sum: seekers get exactly minus the hiders", rewards["seekers"][0] == -rewards["hiders"][0])
+closeness = 1 - 0.7 / cfg.CLOSENESS_RANGE
+time_left = (cfg.MAX_STEPS - (HUNT + 1)) / (cfg.MAX_STEPS - cfg.HIDING_PHASE)
+expected = cfg.REWARD_SEEN * closeness + cfg.REWARD_CATCH + cfg.REWARD_WIN + cfg.REWARD_TIME_BONUS * time_left
+check(f"catch: seekers get seen x closeness + catch + win + time bonus = {expected:.3f}",
+      close(rewards["seekers"][0], expected, 1e-4))
+check("zero-sum: hiders get exactly minus the seekers", rewards["hiders"][0] == -rewards["seekers"][0])
 
-# --- rewards ---
+place(env, seekers=[(3.2, 2.5, 0)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+env.step([STAY], [STAY])
+check("close but facing away: no catch", env.hider_alive[0])
+
+place(env, seekers=[(3.2, 2.5, 140)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+env.step([STAY], [STAY])
+check(f"close, hider 40 degrees off where the seeker looks: seen but not caught (needs {cfg.CATCH_ANGLE})",
+      env.hider_alive[0] and env.seeker_sees[0, 0])
+
+place(env, seekers=[(3.4, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+env.step([STAY], [STAY])
+check(f"facing the hider but 0.9 away (catch distance {cfg.CATCH_DISTANCE}): no catch", env.hider_alive[0])
+
+# ======================================================================
+# rewards
+# ======================================================================
 env.reset(seed=0, n_seekers=1, n_hiders=1)
-place(env, seeker=(1, 8), hider=(1, 1), t=cfg.HIDING_PHASE)
-_, rewards, _, info = env.step([0], [0])
-check("hidden hider gets +1, seeker -1", rewards["hiders"][0] == 1 and rewards["seekers"][0] == -1)
+_, rewards, _, _ = env.step([STAY], [STAY])
+check("hiding phase: no rewards", rewards["seekers"][0] == 0 and rewards["hiders"][0] == 0)
 
-# --- observations ---
+place(env, seekers=[(8.5, 1.5, 0)], hiders=[(1.5, 1.5, 0)], t=HUNT)
+_, rewards, _, _ = env.step([STAY], [STAY])
+check(f"no hider in sight: seekers {cfg.REWARD_UNSEEN}, hiders {-cfg.REWARD_UNSEEN}",
+      close(rewards["seekers"][0], cfg.REWARD_UNSEEN) and close(rewards["hiders"][0], -cfg.REWARD_UNSEEN))
+
+place(env, seekers=[(7.5, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+_, rewards, _, _ = env.step([STAY], [STAY])
+expected = cfg.REWARD_SEEN * (1 - 5 / cfg.CLOSENESS_RANGE)
+check(f"hider in sight 5 away: seekers get {expected:.3f} (more when closer)", close(rewards["seekers"][0], expected, 1e-5))
+
+place(env, seekers=[(8.5, 1.5, 0)], hiders=[(1.5, 1.5, 0)], t=cfg.MAX_STEPS - 1)
+_, rewards, done, info = env.step([STAY], [STAY])
+expected = cfg.REWARD_UNSEEN + cfg.REWARD_LOSS
+check(f"hiders survive the time limit: hiders win, seekers get {expected}",
+      done and info["winner"] == "hiders" and close(rewards["seekers"][0], expected, 1e-5))
+
+# the farming exploit from the grid version: is following a hider without catching it ever better?
+place(env, seekers=[(5.5, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+follow, done = 0.0, False
+while not done:
+    _, rewards, done, _ = env.step([STAY], [STAY])
+    follow += rewards["seekers"][0]
+place(env, seekers=[(3.2, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+_, rewards, _, _ = env.step([STAY], [STAY])
+catch = rewards["seekers"][0]
+check(f"no farming: watching a hider 3 away for the whole round ({follow:+.1f}) pays less than catching it ({catch:+.1f})",
+      catch > follow)
+
+# ======================================================================
+# observations
+# ======================================================================
+place(env, seekers=[(7.5, 2.5, 180)], hiders=[(2.5, 2.5, 180)], t=HUNT)
 obs = env._get_obs()
-g = obs["seekers"][0]["grid"]
-check(f"close-up shape is ({N_CHANNELS}, {cfg.OBS_WINDOW}, {cfg.OBS_WINDOW})", g.shape == (N_CHANNELS, cfg.OBS_WINDOW, cfg.OBS_WINDOW))
-mm = obs["seekers"][0]["minimap"]
-check(f"minimap shape is ({N_MINIMAP_CHANNELS}, {cfg.MINIMAP_SIZE}, {cfg.MINIMAP_SIZE})", mm.shape == (N_MINIMAP_CHANNELS, cfg.MINIMAP_SIZE, cfg.MINIMAP_SIZE))
-check("minimap marks my own position", mm[MM_ME].sum() > 0)
-check("agent's own cell is never a wall", g[0, cfg.OBS_WINDOW // 2, cfg.OBS_WINDOW // 2] == 0)
+o = obs["seekers"][0]
+check(f"shapes: rays {o['rays'].shape}, enemies {o['enemies'].shape}, vec {o['vec'].shape}, minimap {o['minimap'].shape}",
+      o["rays"].shape == (cfg.N_RAYS, RAY_FEATURES) and o["enemies"].shape == (cfg.MAX_TEAM_SIZE, ENEMY_FEATURES)
+      and o["vec"].shape == (VEC_DIM,) and o["minimap"].shape == (N_MINIMAP_CHANNELS, cfg.MINIMAP_SIZE, cfg.MINIMAP_SIZE))
+check("every ray hit exactly one thing (wall, teammate or enemy)", np.allclose(o["rays"][:, 1:].sum(axis=1), 1))
+check(f"seen hider is in the first enemy slot, straight ahead, 5 away: {np.round(o['enemies'][0], 3)}",
+      np.allclose(o["enemies"][0], [1, 1, 0, 5 / cfg.RAY_NORM], atol=1e-5) and not o["enemies"][1:].any())
+check("the hider looking the other way has an empty enemy list", not obs["hiders"][0]["enemies"].any())
+check("minimap marks my own position", o["minimap"][MM_ME].sum() > 0)
 
-# --- memory ---
-place(env, seeker=(2, 6), hider=(2, 2), t=cfg.HIDING_PHASE)
-check("memory marks a spotted hider", env.seeker_memory[0, 2, 2] == 1.0)
-place(env, seeker=(1, 8), hider=(1, 1))
-check("memory fades after losing sight", 0 < env.seeker_memory[0, 2, 2] < 1.0)
-
-# --- time limit ---
-env.reset(seed=0, n_seekers=1, n_hiders=1)
-place(env, seeker=(1, 8), hider=(1, 1), t=cfg.MAX_STEPS - 1)
-_, rewards, done, info = env.step([0], [0])
-check("hiders win if they survive the time limit", done and info["winner"] == "hiders")
-expected = cfg.REWARD_HIDDEN + cfg.REWARD_WIN   # +1 + 10 = 11 for hiders
-check(f"surviving the last step: hiders get hidden + win = {expected}", rewards["hiders"][0] == expected)
-
-# --- shared team search memory ---
+# ======================================================================
+# shared team search memory
+# ======================================================================
 env.reset(seed=0, n_seekers=2, n_hiders=1)
-env.seekers = np.array([[2, 6], [1, 8]])     # seeker 0 looks along the open row 2, seeker 1 sits in the right corner
-env.hiders = np.array([[1, 1]])
-env.hider_alive[:] = True
-env.t = cfg.HIDING_PHASE
-env._update_vision()
+place(env, seekers=[(8.5, 1.5, 180), (8.5, 3.5, 0)], hiders=[(1.5, 3.5, 270)], t=HUNT)
+env.searched = {"seekers": np.zeros((env.H, env.W), np.float32), "hiders": np.zeros((env.H, env.W), np.float32)}
+env._update_memory()
+s = env.searched["seekers"]
+check("cells inside seeker 0's cone are marked searched", s[1, 5] == 1.0 and s[2, 3] == 1.0)
+check("a cell hidden behind the wall is not", s[1, 2] == 0.0)
+check("a cell behind the seeker's back is not", s[1, 9] == 0.0)
 obs = env._get_obs()
-check("a cell seeker 0 sees is marked as searched", env.searched["seekers"][2, 3] == 1.0)
-check("seeker 1 can't see that cell itself", not env.view_of(env.seekers[1])[2, 3])
-r = cfg.OBS_WINDOW // 2
-in_window = obs["seekers"][1]["grid"][CH_SEARCHED, r + (2 - 1), r + (3 - 8)]   # cell (2, 3) seen from (1, 8)
-check("but it shows as searched in seeker 1's own observation (shared by the team)", in_window == 1.0)
-check("hiders have their own separate searched layer", env.searched["hiders"][2, 3] != env.searched["seekers"][2, 3] or
-      env.view_of(env.hiders[0])[2, 3])
-check("teammate appears on the minimap", obs["seekers"][0]["minimap"][MM_TEAMMATES].sum() > 0)
+check("both seekers get the same searched layer on their minimap (shared by the team)",
+      np.array_equal(obs["seekers"][0]["minimap"][MM_SEARCHED], obs["seekers"][1]["minimap"][MM_SEARCHED]))
 
-# move both seekers away so (2, 3) is out of everyone's sight, then count the steps until it fades out
-env.seekers = np.array([[1, 8], [1, 9]])
-env.hiders = np.array([[1, 1]])
+# turn seeker 0 to face the east wall, so (1, 5) is out of every seeker's sight, then count the steps until it fades out
+env.seeker_heading[0] = 0.0
 values = []
 for k in range(cfg.SEARCH_MEMORY_STEPS + 2):
-    env._update_vision()
-    values.append(float(env.searched["seekers"][2, 3]))
-check("the cell is now out of every seeker's sight", not env.view_of(env.seekers[0])[2, 3] and not env.view_of(env.seekers[1])[2, 3])
+    env._update_sight()
+    env._update_memory()
+    values.append(float(env.searched["seekers"][1, 5]))
 check(f"searched mark fades steadily ({values[0]:.1f} -> {values[1]:.1f} -> {values[2]:.1f} ...)", values[0] > values[1] > values[2] > 0)
 steps_to_zero = values.index(0.0) + 1
 check(f"searched mark is gone after exactly {cfg.SEARCH_MEMORY_STEPS} steps unseen (took {steps_to_zero})",
