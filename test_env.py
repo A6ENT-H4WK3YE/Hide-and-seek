@@ -210,7 +210,8 @@ check(f"hiders survive the time limit: hiders win, seekers get {expected}",
       done and info["winner"] == "hiders" and close(rewards["seekers"][0], expected, 1e-5))
 
 # the farming exploit from the grid version: is following a hider without catching it ever better?
-place(env, seekers=[(5.5, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
+# Worst case: watching from 0.9 away, just outside catch distance, for the whole round.
+place(env, seekers=[(3.4, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
 follow, done = 0.0, False
 while not done:
     _, rewards, done, _ = env.step([STAY], [STAY])
@@ -218,7 +219,7 @@ while not done:
 place(env, seekers=[(3.2, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
 _, rewards, _, _ = env.step([STAY], [STAY])
 catch = rewards["seekers"][0]
-check(f"no farming: watching a hider 3 away for the whole round ({follow:+.1f}) pays less than catching it ({catch:+.1f})",
+check(f"no farming: watching a hider from 0.9 away for the whole round ({follow:+.1f}) pays less than catching it ({catch:+.1f})",
       catch > follow)
 
 # ======================================================================

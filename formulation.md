@@ -50,16 +50,16 @@ Written from the seekers' side; hiders always get exactly minus this (zero-sum).
 | Event | Seekers |
 |---|---|
 | hiding phase step | 0 |
-| a hider is in sight | +0.05 x closeness (1 when touching, falling evenly to 0 at 10 units; the best pair counts) |
+| a hider is in sight | +0.2 x closeness (1 when touching, falling evenly to 0 at 10 units; the best pair counts). v2 used 0.05, see v2.1 |
 | no hider in sight | -0.05 |
 | each catch | +10 |
 | all hiders caught | +10, plus up to +10 for time left (10 x steps left / hunting steps) |
 | hiders survive to the time limit | -10 |
 
 - **Why (fixes the farming exploit):** in v1 seekers got +1 every step they could see a hider, and catching ended the round,
-  so following a hider for about 26 steps or more paid more than catching it. Now the per-step rewards are tiny next to a
-  catch: watching a hider 3 units away for a whole round is worth about -7 to the seekers, catching it at once about +30
-  (checked in `test_env.py`).
+  so following a hider for about 26 steps or more paid more than catching it. Now the per-step rewards are small next to a
+  catch: in v2.1, watching a hider from 0.9 away (just out of reach) for a whole round is worth about +5.5 to the seekers,
+  catching it at once about +30 (checked in `test_env.py`).
 - Closeness only counts while a hider is seen. Hiders are not rewarded for distance while unseen: they could not observe
   it, and it would teach running to corners instead of hiding.
 
@@ -184,6 +184,16 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   still while looking around, then backs away from a seeker while facing it. Reference numbers, 2v1 tiny, 300 games:
   random v random 20%, chaser v random hider 89%, chaser v fleeing bot 74%, random seekers v fleeing bot 4%.
   These are not comparable with the grid bot numbers.
+
+### v2.1: reward for keeping a hider in sight 0.05 -> 0.2 per step
+- **What changed:** only `REWARD_SEEN`. Everything else is identical to v2.
+- **Why:** in the first v2 run seekers learned to strafe sideways while spinning (86% of moves strafe right, the most
+  common turn +90), sweeping the room like a lighthouse. Even with a hider in sight they never walked forward and lost
+  it half the time by the next step. With only 0.05 a step for keeping a hider in view, locking on was hardly worth
+  learning, and a spinning seeker near a hider lands the catch anyway once the hider falls in its 30 degree window.
+  At 0.2, keeping the hider in view is worth learning, and hiders (who get the opposite) get a real reason to break
+  line of sight.
+- **Still no farming:** watching from 0.9 away for a whole round is worth about +5.5, catching about +30.
 
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.

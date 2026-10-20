@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v2"
+GAME_VERSION = "v2.1"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -49,7 +49,7 @@ MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SI
 # Written from the seekers' side. All rewards are shared by the whole team,
 # and hiders always get exactly minus what seekers get (zero-sum).
 # The per-step rewards are small, so following a hider without catching it never pays more than catching.
-REWARD_SEEN = 0.05      # per step a hider is in sight: seekers + REWARD_SEEN x closeness
+REWARD_SEEN = 0.2       # per step a hider is in sight: seekers + REWARD_SEEN x closeness (v2: 0.05)
 CLOSENESS_RANGE = 10.0  # closeness is 1 when touching, falling evenly to 0 at this distance
 REWARD_UNSEEN = -0.05   # per step no hider is in sight
 REWARD_CATCH = 10.0     # per catch
