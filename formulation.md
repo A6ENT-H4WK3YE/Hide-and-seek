@@ -219,3 +219,8 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   forward 74% of the time (v2: 0%). 96% against random hiders, 67% against the fleeing bot (chaser bots 79%), self-play 86%.
   While searching they walk backwards most of the time, since backpedalling is as fast as walking forward.
   Hiders are still no better than random against the chaser bot (91% caught, random hider 88%).
+- **2v1, three_sites, v2.1 (5M steps, 250-step rounds, 30-step hiding phase):** both teams learned. Trained hiders are caught by the
+  chaser bot 54% of the time (random hider 70%, fleeing bot 51%); trained seekers beat random hiders 77% (random seekers 1%, chaser
+  bots 70%) and the fleeing bot 37% (chaser bots 51%); self-play 37%. Hiders mostly rotate to site A and the corridors next to it,
+  rarely to B in the middle; seekers push up the middle, then spread to the sites. On the tiny map a searching seeker finds you
+  almost anywhere, which is probably why hiders only learned on the big map.

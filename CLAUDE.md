@@ -146,6 +146,21 @@ python evaluate.py runs/<run>/checkpoints/latest.pt
   The bigger hider signal did not fix that on its own; with seekers now winning 86% of self-play, hiders are mostly losing.
 - Next agreed step: team spotting (enemies a teammate sees show up in my enemy slots, shared "last seen enemy" memory).
 
+**2v1, big map (three_sites), v2.1 (`runs/v2.1_three_sites_2v1_20261020_221754`, 5M steps, 250-step rounds, 30-step hiding phase, about 1h40, 900 steps/s):**
+- Both teams learned here, unlike on the tiny map. Seekers' win rate, 300 games each:
+  trained seekers v random hider 77% (random seekers 1%, chaser bots 70%); trained seekers v fleeing bot 37% (chaser bots 51%);
+  chaser bot v trained hiders 54% (random hider 70%, fleeing bot 51%); self-play 37%.
+- So trained hiders are about as good as the scripted fleeing bot, and trained seekers beat the chaser bots against
+  random hiders but not against the fleeing bot.
+- Seekers learned nothing for the first ~400k steps (self-play 1%), then took off. Starting from the tiny-map networks was not needed.
+- Emergent behaviour (150 self-play games, heatmaps in the run folder `behaviour_heatmaps.png`):
+  - hiders stay near their spawn in the hiding phase, then mostly rotate **left to site A** (31% of hunting time) or sit in
+    the corridors near it (40%); site C 14%, site B (the middle, on the seekers' route) only 3%. One side is strongly preferred.
+  - seekers push straight **up the middle** past B, then spread out to the sites; the two seekers are a median of 10 units apart,
+    so they partly split up. Most catches happen around site A and the top corridor.
+  - seekers still strafe most of the time (73% of moves), and lock on when they see the hider (forward 71% of those steps).
+- Fewer hiders spotted per step than on the tiny map (6.5% in self-play), so hiding by staying out of sight works here.
+
 **Bugs and lessons found along the way:**
 - Minibatch NaN crash: a leftover minibatch of size 1 made the advantage standard deviation NaN.
   Fixed by normalising advantages once per batch and splitting into equal minibatches.
