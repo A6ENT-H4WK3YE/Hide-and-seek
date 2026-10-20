@@ -201,3 +201,7 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
 - **Bot check for team sizes (seekers win, chaser bots vs fleeing bots):** 1v1 0%, 2v1 38%, 3v1 65%, 2v2 22%.
   2v1 is the first balanced setting, and the bots don't even coordinate, so trained seekers that work together
   should do better. Next: 2v1 with the opponent pool, on v1.2.
+- **2v1, tiny, v2 (continuous, opponent pool, 2M steps):** seekers learned (65% against random hiders, random seekers 20%;
+  21% against the fleeing bot, random seekers 4%) and split up to search. Hiders did not: the chaser bot catches them 91%
+  of the time, the same as a random hider (88%). Self-play seeker win rate rose from about 20% to about 45%.
+  Next: a longer run to see whether hiders start learning once the seekers settle.

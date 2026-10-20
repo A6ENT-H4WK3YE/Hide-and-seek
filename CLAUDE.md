@@ -46,7 +46,7 @@ agents playing in a 3D world. The goal can grow later.
 
 Roadmap:
 1. v1: grid world (done, see results)
-2. **v2: continuous space with cone vision (built on branch `v2-continuous`, first training run under way)**
+2. **v2: continuous space with cone vision (built on branch `v2-continuous`, first 2M run done, see results)**
 3. Walk vs run with sound (running is fast but makes noise; sound blocked by walls)
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
@@ -121,6 +121,18 @@ python evaluate.py runs/<run>/checkpoints/latest.pt
 **2v1, tiny map, grid version with memory and minimap (`runs/v1.1_tiny_2v1_*`, really v1.2 rules: the run card says v1.1 because GAME_VERSION was not bumped at the time):**
 - Stopped early at about 57k steps (27 updates), so not conclusive. Seekers won almost every self-play game
   early on; hiders improved against the chaser bot from being caught 81% to 65% of the time.
+
+**2v1, tiny map, v2 continuous (`runs/v2_tiny_2v1_20261020_201530`, 2M steps, 28 min, about 1,230 steps/s):**
+- Seekers learned. Against random hiders they went from 20% (random seekers) to 65%. Against the fleeing bot, 21%
+  (random seekers 4%, chaser bots 79%). In the self-play GIF the two seekers split up and search opposite sides.
+- Hiders did not learn to escape. The chaser bot catches them 91% of the time, the same as a random hider (88%).
+  Their entropy stayed close to random (3.1 to 3.6, random is 3.8), while the seekers' dropped to about 2.0.
+- Self-play seeker win rate rose from about 20% to about 45%, and the seekers were still improving at the end
+  (their entropy only started dropping fast after about 1.3M steps).
+- Not yet known why hiders are stuck. Candidates: their per-step signal is tiny (0.05) next to the round outcome;
+  on the tiny map a seeker that searches finds you almost anywhere; one-way sight means they often get caught from
+  behind by a seeker they never saw. Next step, one change: a longer run (5M steps) to see whether hiders start
+  learning once the seekers stop changing so fast.
 
 **Bugs and lessons found along the way:**
 - Minibatch NaN crash: a leftover minibatch of size 1 made the advantage standard deviation NaN.
@@ -197,8 +209,8 @@ is the stepping stone to the continuous-time version of the end goal.
 - `test_env.py` has 40 checks: exact wall contact and sliding, no wall overlap in random play, rays exact,
   no seeing through corner gaps, one-way sight, cone edges, catch rules, every reward number, the anti-farming check
   (watching a hider for a whole round is worth about -7 to seekers, catching it about +30), observations, team memory.
-- Speed: vision 0.5 ms per step for 3 agents; random play about 2,000 game steps/s; training about the same as the grid
-  2v1 (smoke run reached 717 steps/s including the one-off bot measurements, still climbing).
+- Speed: vision 0.5 ms per step for 3 agents; random play about 2,000 game steps/s; training about 1,230 steps/s in 2v1
+  (faster than the grid 2v1 at 730, because the network input is smaller). A 2M run takes about 30 minutes.
 - Bots rewritten: they plan on the grid of cells underneath, then turn and walk. The chaser wanders to random spots when
   it has no target; the fleeing hider waits still while looking around, then backs away from a seeker while facing it.
 - v2 reference numbers (2v1 tiny, 300 games, seekers' win rate): random v random 20%, chaser v random hider 89%,
