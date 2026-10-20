@@ -33,7 +33,7 @@ python preview_map.py maps/three_sites.txt
 - **Teams:** variable size, from 1v1 up to 5v5.
 - **Hiding phase:** seekers are frozen for the first few steps so hiders can get into position.
 - **Vision:** an agent sees a cell within its vision range only if no wall blocks the straight line to it.
-- **Catch:** a hider is caught when a seeker reaches an adjacent cell.
+- **Catch:** a hider is caught when a seeker reaches an adjacent cell (or the same cell). Agents can share cells.
 - **Round end:** time limit reached (hiders win if any survive) or all hiders caught (seekers win).
 - **Reward (team based):** each step, hiders get +1 if no hider is visible to any seeker and -1 otherwise; seekers get the opposite, plus a bonus per catch.
 
@@ -50,8 +50,10 @@ python preview_map.py maps/three_sites.txt
 config.py      all settings in one place
 preview_map.py draw a map to PNG and check it is fully connected
 maps/          map files and their previews
-env.py         map, movement, line of sight, catches, rewards
+env.py         map, movement, line of sight, catches, rewards, observations
 render.py      draw frames, save GIFs
+test_env.py    quick checks that the game rules work
+random_demo.py random agents: record one GIF, then baseline win rates and speed
 model.py       small CNN policy and value network
 train.py       PPO self-play training loop
 evaluate.py    load a checkpoint, play rounds, make GIFs and win-rate plots
@@ -68,11 +70,28 @@ runs/          training outputs (ignored by git)
 5. GRU memory instead of the hand-made memory layer, then communication signals.
 6. Continuous-time upgrade: pursuit-evasion with momentum and turning limits.
 
-## Setup
+## Quick start
 
 ```
 pip install -r requirements.txt
+python test_env.py                         # check the rules (should say: all checks passed)
+python random_demo.py                      # random 1v1 on the tiny map, GIF saved in runs/
+python random_demo.py maps/tiny.txt 2 2    # random 2v2
 ```
+
+## What each agent sees
+
+A 9 x 9 square centred on itself, with 5 layers:
+
+1. walls
+2. teammates
+3. enemies it can see right now
+4. memory: where it last saw enemies, fading over time (cleared when it looks and they're gone)
+5. the cells it can currently see
+
+Plus 4 numbers: its position on the map, how far through the round it is, and whether it's still the hiding phase.
+
+## Setup notes
 
 PyTorch is installed separately because the right build depends on your GPU:
 

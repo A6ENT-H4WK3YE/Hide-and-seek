@@ -44,7 +44,7 @@ GAE_LAMBDA = 0.95
 CLIP_EPS = 0.2
 PPO_EPOCHS = 4
 BATCH_GAMES = 64        # games collected before each PPO update
-DEVICE = "cuda"         # "cuda" also works for AMD ROCm builds of PyTorch; use "cpu" if no GPU
+DEVICE = "auto"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU
 
 # ---------- logging ----------
 RUN_DIR = "runs"
