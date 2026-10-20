@@ -8,7 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PIL import Image
-import notebooks.config as cfg
+import config as cfg
 
 WALL = np.array([43, 47, 58]) / 255
 FLOOR = np.array([217, 212, 199]) / 255

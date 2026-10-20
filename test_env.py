@@ -4,8 +4,8 @@
 import os
 import tempfile
 import numpy as np
-import notebooks.config as cfg
-from notebooks.env import HideSeekEnv, compute_visibility
+import config as cfg
+from env import HideSeekEnv, compute_visibility
 
 TEST_MAP = """\
 ###########

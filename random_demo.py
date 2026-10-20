@@ -10,9 +10,9 @@ import os
 import sys
 import time
 import numpy as np
-import notebooks.config as cfg
-from notebooks.env import HideSeekEnv
-from notebooks.render import draw_frame, save_gif
+import config as cfg
+from env import HideSeekEnv
+from render import draw_frame, save_gif
 
 map_file = sys.argv[1] if len(sys.argv) > 1 else cfg.MAP_FILE
 n_seekers = int(sys.argv[2]) if len(sys.argv) > 2 else cfg.N_SEEKERS

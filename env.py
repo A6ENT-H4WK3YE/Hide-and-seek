@@ -10,7 +10,7 @@
 # rewards is a dict {"seekers": array, "hiders": array}, one number per agent.
 
 import numpy as np
-import notebooks.config as cfg
+import config as cfg
 
 # action id -> (dy, dx)
 MOVES = {
