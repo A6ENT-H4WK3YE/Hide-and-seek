@@ -213,22 +213,22 @@ def ppo_update(team, b, last_value):
     actions = to_t(b["action"], torch.int64)
     old_logp, adv_t, ret_t = to_t(b["logp"]), to_t(adv), to_t(returns)
 
+    # normalise advantages once over the whole batch (keeps step sizes sensible).
+    # Done here, not per minibatch: a tiny minibatch has no meaningful spread and gives NaN.
+    adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
+
     # --- PPO: several passes over the data in minibatches ---
     net, opt = nets[team], opts[team]
-    mb_size = max(n // cfg.MINIBATCHES, 1)
     stats = {"pg_loss": [], "v_loss": [], "entropy": [], "approx_kl": [], "clip_frac": []}
     for epoch in range(cfg.PPO_EPOCHS):
         perm = torch.randperm(n, device=device)
-        for start in range(0, n, mb_size):
-            idx = perm[start:start + mb_size]
+        # exactly MINIBATCHES chunks of (nearly) equal size, so no tiny leftover chunk
+        for idx in torch.tensor_split(perm, cfg.MINIBATCHES):
             logits, value = net(g[idx], v[idx])
             dist = torch.distributions.Categorical(logits=logits)
             new_logp = dist.log_prob(actions[idx])
             entropy = dist.entropy().mean()
-
-            # normalise advantages inside the minibatch (keeps step sizes sensible)
             a = adv_t[idx]
-            a = (a - a.mean()) / (a.std() + 1e-8)
 
             # ratio = how much more (or less) likely the new policy makes this action than before
             ratio = torch.exp(new_logp - old_logp[idx])
