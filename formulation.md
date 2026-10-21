@@ -281,6 +281,12 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
 - **Not chosen:** a reward for being far from seekers (hiders cannot observe distance when they neither see nor hear
   a seeker, and it would teach running to corners instead of hiding).
 
+- **Hiders-only run stopped by Moeez at 1.85M of 5M steps** (`runs/v3.3_three_sites_2v1_20261021_185327`): against the
+  final v3.2 seekers the new hiders already survived almost every round (seekers won 1.5%, the hider was spotted on 0.6%
+  of steps). Moeez: the seekers must keep learning too, from their trained point, so they adapt to the new hiders.
+- **Next run (same v3.3 rules): both teams learn again**, seekers starting from the final v3.2 network and hiders from
+  the v3.3 network above (`START_FROM` in config). At the start the seekers win only about 2% of self-play.
+
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.
   This changes how agents learn, not what the game is, so it does not get a game version.

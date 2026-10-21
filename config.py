@@ -102,8 +102,13 @@ N_WORKERS = 16          # the games run in this many parallel processes (workers
 # Both teams learn by default (self-play). With only "hiders" here, the seekers are frozen: they play with the
 # networks saved by an earlier run (FROZEN_RUN), the final one in normal games and the run's earlier checkpoints
 # (from weak to strong) as the opponent pool, so the new hiders also meet seekers they can beat.
-TRAIN_TEAMS = ["hiders"]
-FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"
+TRAIN_TEAMS = ["seekers", "hiders"]
+FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"   # only used for a team that is not in TRAIN_TEAMS
+# Start a team from a saved network instead of from scratch ({} = everyone from scratch). It keeps learning from there.
+START_FROM = {
+    "seekers": "runs/v3.2_three_sites_2v1_20261021_170702/checkpoints/latest.pt",   # final v3.2 seekers
+    "hiders": "runs/v3.3_three_sites_2v1_20261021_185327/checkpoints/latest.pt",    # v3.3 hiders (stopped at 1.85M)
+}
 
 # ---------- opponent pool (stops self-play going round in circles) ----------
 # Plain self-play can cycle: hiders pick a side, seekers learn that side, hiders switch, and so on.

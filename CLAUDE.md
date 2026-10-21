@@ -6,21 +6,20 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 
 ## Where we left off (2026-10-21, night)
 
-- Branch `main`, game version **v3.3**, map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers,
-  ray casting compiled with numba.
-- **v3.3 run started: hiders only** (`TRAIN_TEAMS = ["hiders"]`) against frozen v3.2 seekers (final network in normal
-  games, 17 checkpoints from the v3.2 run as their pool), hiders from scratch with a 0.02 noise cost and the walk / run
-  switch starting at 95% "keep". About 2,500 steps/s (only one team learns), so about 35 minutes.
-- Why: v3.2 seekers won 98%. Hiders pressed switch on 61% of steps (an untrained network switches half the time, which
-  cancels the point of a toggle), so they ran half the time and were heard through walls. Moeez: fix the hiders first,
-  keep the seekers, then train both together again, then team spotting.
-- After the run, check: does the hider hold walk mode (switch rate, time in run mode, noise per hunting step), how often
-  it survives against the final v3.2 seekers (self-play win rate in metrics.csv counts only games against the final
-  seekers), evaluate.py, forced-walk test, how hiders react when they hear a seeker, heatmaps.
-- Then, one change each: train both teams together again starting from the new hiders (and the v3.2 seekers);
-  v3.4 double the win / loss reward (also restores the anti-farming margin); team spotting; aim reward.
-- v3.2 and the partial v3.1 run are analysed (results below). Analysis scripts still live in the scratchpad
-  (an `analyse.py` in the repo was offered, not decided).
+- Branch `main`, game version **v3.3** (hiders pay 0.02 per noisy step; walk / run switch starts at 95% "keep"),
+  map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, ray casting compiled with numba.
+- The hiders-only v3.3 run (frozen v3.2 seekers) was stopped by Moeez at 1.85M steps
+  (`runs/v3.3_three_sites_2v1_20261021_185327`): the new hiders already beat the v3.2 seekers (seekers won 1.5%).
+  Not analysed yet (is it quiet hiding, or a hole in the frozen seekers?).
+- **Run started: both teams learn again** (`TRAIN_TEAMS` both), **seekers from the final v3.2 network, hiders from the
+  v3.3 network** (`START_FROM` in config), 5M steps, same v3.3 rules. Run name `v3.3_both_*`.
+- Moeez's next idea (asked mid-run, not built): **an exploration reward for seekers** so they cover the map instead of
+  leaving dead zones (in v3.2 they barely visited site A). Proposed design: seekers get a small reward for each map cell
+  their team's cones cover that nobody on the team had searched recently (uses the existing team "searched" memory),
+  seekers only (not zero-sum, like the hider noise cost), small enough that a whole round of exploring is worth less than
+  a catch. Planned as its own change after this run, to see first whether seekers widen their search by themselves.
+- Then, one change each: v3.4 double the win / loss reward; team spotting; aim reward.
+- Analysis scripts still live in the scratchpad (an `analyse.py` in the repo was offered, not decided).
 
 ## Who you are working with
 
@@ -179,7 +178,8 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3 | big, 5M | 71% (chaser 96%) | **74%** (chaser 80%) | 94% (random hider 96%, fleeing bot 80%) | 85% |
 | v3.1 | big, 3.4M (stopped) | 84% (chaser 96%) | 41% (chaser 80%) | **87%** (random hider 96%, fleeing bot 80%) | 31% |
 | v3.2 | big, 5M | 99% (chaser 100%) | 76% (chaser 91%) | 99% (random hider 100%, fleeing bot 88%) | 98% |
-| v3.3 | big, 5M, hiders only v frozen v3.2 seekers | (seekers frozen) | (seekers frozen) | training | training |
+| v3.3 | big, hiders only v frozen v3.2 seekers, stopped at 1.85M | (seekers frozen) | (seekers frozen) | not evaluated | 1.5% v the final v3.2 seekers |
+| v3.3 both | big, 5M, both learning, seekers from v3.2, hiders from v3.3 | training | | | starts about 2% |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 

@@ -92,6 +92,8 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- learning: {', '.join(cfg.TRAIN_TEAMS)}"
             + (f" (the others are frozen, loaded from {cfg.FROZEN_RUN})" if len(cfg.TRAIN_TEAMS) < 2 else " (self-play)")
             + f"; hider noise cost {cfg.HIDER_NOISE_COST}, switch starts at keep {cfg.SWITCH_KEEP_PROB:.0%}\n")
+    for team, path in cfg.START_FROM.items():
+        f.write(f"- {team} start from {path} (and keep learning)\n")
     f.write(f"- total steps: {total_steps:,}\n\n")
     f.write("## All settings\n\n")
     for k, v in settings.items():
@@ -111,6 +113,10 @@ game_alive = np.ones((E, cfg.N_HIDERS), dtype=bool)             # which hiders a
 eval_env = HideSeekEnv(cfg.MAP_FILE)
 
 nets = {team: TeamNet().to(device) for team in TEAMS}
+# teams that start from a saved network (START_FROM) instead of from scratch
+for team, path in cfg.START_FROM.items():
+    nets[team].load_state_dict(torch.load(path, map_location=device, weights_only=False)[team])
+    print(f"{team} start from {path}")
 opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, eps=1e-5) for team in cfg.TRAIN_TEAMS}
 
 # ---------- opponent pool ----------
