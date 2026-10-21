@@ -12,13 +12,13 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 
 | Version | What it added | Status |
 |---|---|---|
-| v1 | grid world, 360 degree vision, catch by standing next to a hider | done (tag `v1-grid`, branch `main`) |
+| v1 | grid world, 360 degree vision, catch by standing next to a hider | done (kept as tag `v1-grid`) |
 | v1.1 / v1.2 | bigger observation window; team-shared "searched recently" memory and a minimap | done |
 | v2 | continuous space, 90 degree vision cone, rays, exact line of sight, catch by distance and facing, rewards that cannot be farmed | done |
 | v2.1 | stronger reward for keeping a hider in sight (seekers had learned to spin) | done |
 | big map | training on `three_sites.txt` (3 sites, mid, lanes), 250-step rounds | done, now the default |
 | v3 | walk (half speed, silent) or run (full speed, heard by enemies within 6 cells of walking distance) | done |
-| **v3.1** | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | **current** (branch `v2-continuous`, tag `v3.1`), training run to do |
+| **v3.1** | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | **current** (branch `main`, tag `v3.1`), training run to do |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 

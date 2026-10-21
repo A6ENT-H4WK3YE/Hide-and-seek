@@ -6,7 +6,7 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 
 ## Where we left off (2026-10-21, end of session)
 
-- Branch `v2-continuous` (pushed), tag `v3.1` (pushed). Game version **v3.1**, map `three_sites.txt`, 2 seekers v 1 hider,
+- Branch `main` (pushed, now holds all the continuous work), tag `v3.1` (pushed). Game version **v3.1**, map `three_sites.txt`, 2 seekers v 1 hider,
   5M steps per run, 16 game workers.
 - The v3.1 training run was **stopped by Moeez at 539k of 5M steps** (`runs/v3.1_three_sites_2v1_20261021_032009`).
   `train.py` cannot resume, so **next session: start it again** with `caffeinate -i python train.py` (about 45 minutes).
@@ -102,7 +102,8 @@ runs/           training outputs, ignored by git (run_card.md, metrics.csv, curv
                 and for analysed runs behaviour_heatmaps.png)
 ```
 
-Git: `main` = the grid version (tag `v1-grid`). Branch `v2-continuous` = all continuous work (v2 to v3.1), tag `v3.1`.
+Git: `main` = the latest work (v2 to v3.1 and on). The grid version is kept as tag `v1-grid`; tag `v3.1` marks the end of
+the 2026-10-21 session. Branch `v2-continuous` was the working branch while v2 was built (same history, no longer needed).
 
 Commands:
 ```
