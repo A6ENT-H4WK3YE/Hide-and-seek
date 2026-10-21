@@ -366,7 +366,7 @@ for k in range(cfg.SEARCH_MEMORY_STEPS + 2):
     env._update_sight()
     env._update_memory()
     values.append(float(env.searched["seekers"][1, 5]))
-check(f"searched mark fades steadily ({values[0]:.1f} -> {values[1]:.1f} -> {values[2]:.1f} ...)", values[0] > values[1] > values[2] > 0)
+check(f"searched mark fades steadily ({values[0]:.2f} -> {values[1]:.2f} -> {values[2]:.2f} ...)", values[0] > values[1] > values[2] > 0)
 steps_to_zero = values.index(0.0) + 1
 check(f"searched mark is gone after exactly {cfg.SEARCH_MEMORY_STEPS} steps unseen (took {steps_to_zero})",
       steps_to_zero == cfg.SEARCH_MEMORY_STEPS)

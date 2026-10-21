@@ -6,19 +6,20 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 
 ## Where we left off (2026-10-21, night)
 
-- Branch `main`, game version **v3.3** (hiders pay 0.02 per noisy step; walk / run switch starts at 95% "keep"),
-  map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, ray casting compiled with numba.
-- The hiders-only v3.3 run (frozen v3.2 seekers) was stopped by Moeez at 1.85M steps
-  (`runs/v3.3_three_sites_2v1_20261021_185327`): the new hiders already beat the v3.2 seekers (seekers won 1.5%).
-  Not analysed yet (is it quiet hiding, or a hole in the frozen seekers?).
-- **Run started: both teams learn again** (`TRAIN_TEAMS` both), **seekers from the final v3.2 network, hiders from the
-  v3.3 network** (`START_FROM` in config), 5M steps, same v3.3 rules. Run name `v3.3_both_*`.
-- Moeez's next idea (asked mid-run, not built): **an exploration reward for seekers** so they cover the map instead of
-  leaving dead zones (in v3.2 they barely visited site A). Proposed design: seekers get a small reward for each map cell
-  their team's cones cover that nobody on the team had searched recently (uses the existing team "searched" memory),
-  seekers only (not zero-sum, like the hider noise cost), small enough that a whole round of exploring is worth less than
-  a catch. Planned as its own change after this run, to see first whether seekers widen their search by themselves.
-- Then, one change each: v3.4 double the win / loss reward; team spotting; aim reward.
+- Branch `main`, game version **v3.4**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
+  v3.4 = v3.3 (hiders pay 0.02 per noisy step, switch starts at 95% "keep") + the team "searched recently" memory lasts
+  60 steps instead of 10 (observation only, no reward change).
+- **Run started: both teams learn**, seekers from the final v3.2 network, hiders from the v3.3 network
+  (`START_FROM`), 5M steps, run name `v3.4_both_*`.
+- Earlier tonight: hiders-only v3.3 (frozen v3.2 seekers) stopped at 1.85M (`runs/v3.3_three_sites_2v1_20261021_185327`):
+  seekers won only 1.5% against the new hiders. Then both teams learning (`runs/v3.3_both_*`) stopped at 213k steps
+  (seekers recovering, 2% -> 10%) to add the longer memory.
+- After the run: who wins and how it moves over training; heatmaps (are there still dead zones for seekers?);
+  hider walk / run use (switch rate, noise); forced-walk test; lock-on and teamwork numbers; evaluate.py.
+- If dead zones remain: potential-based exploration shaping for seekers (valid: does not change the best strategy).
+  Then, one change each: double the win / loss reward; team spotting; aim reward.
+- **Always start runs with `caffeinate -i`, smoke runs too.** A smoke run started without it took 15 minutes instead of
+  2, because the Mac dozed while the screen was off.
 - Analysis scripts still live in the scratchpad (an `analyse.py` in the repo was offered, not decided).
 
 ## Who you are working with
@@ -119,7 +120,7 @@ caffeinate -i python train.py        # full run (TOTAL_STEPS in config)
 python evaluate.py runs/<run>/checkpoints/latest.pt 300
 ```
 
-## The game now (v3.3, details in formulation.md)
+## The game now (v3.4, details in formulation.md)
 
 - Continuous 2D space. Every `#` of the map is a solid 1 x 1 square. Agents are circles (radius 0.3) with a position
   and a heading; they slide along walls and can overlap each other. 1 unit = 1 cell, 1 step = about 1 second.
@@ -136,7 +137,8 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
   also pay 0.02 for every step a hider makes noise (not zero-sum any more; a hint while seekers are frozen).
 - Round: 250 steps with a 30-step hiding phase on the big map (100 and 15 on the tiny map). 2 seekers v 1 hider.
 - Each agent observes: rays, enemies in sight, enemies heard, 7 numbers (position, heading, time, hiding phase,
-  running) and a 12 x 12 minimap (walls, me, teammates, team "searched recently", own "last seen enemy" memory).
+  running) and a 12 x 12 minimap (walls, me, teammates, team "searched recently" fading over 60 steps since v3.4, own
+  "last seen enemy" memory).
 - Training: PPO, one network per team. Normally both teams learn (self-play), with half the games against frozen past
   versions from a pool that spans the whole run. `TRAIN_TEAMS` can freeze a team: it then plays with an earlier run's
   networks (`FROZEN_RUN`), its final network plus its checkpoints as the pool. The walk / run switch starts at 95% "keep".
@@ -157,6 +159,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
 | v3.3 | hiders pay 0.02 per noisy step; only hiders learn, against frozen v3.2 seekers (final + 17 checkpoints as pool); switch starts at 95% "keep" (all together, agreed) | v3.2 seekers won 98%; hiders flipped walk / run constantly and were heard through walls. Moeez: fix the hiders first |
+| v3.4 | team "searched recently" memory fades over 60 steps instead of 10 (no reward change); both teams learn from v3.2 seekers / v3.3 hiders | Moeez: seekers leave dead zones and forget where they searched; give them the information rather than an exploration reward |
 
 Decisions behind v2 (agreed 2026-10-20): fixed set of 9 turns (continuous turning is a later experiment); catch 0.8 and
 30 degrees and in sight; radius 0.3, speed 1 for every direction; agents pass through each other; turn then move;
@@ -179,7 +182,8 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3.1 | big, 3.4M (stopped) | 84% (chaser 96%) | 41% (chaser 80%) | **87%** (random hider 96%, fleeing bot 80%) | 31% |
 | v3.2 | big, 5M | 99% (chaser 100%) | 76% (chaser 91%) | 99% (random hider 100%, fleeing bot 88%) | 98% |
 | v3.3 | big, hiders only v frozen v3.2 seekers, stopped at 1.85M | (seekers frozen) | (seekers frozen) | not evaluated | 1.5% v the final v3.2 seekers |
-| v3.3 both | big, 5M, both learning, seekers from v3.2, hiders from v3.3 | training | | | starts about 2% |
+| v3.3 both | big, both learning, seekers from v3.2, hiders from v3.3, stopped at 213k | not evaluated | | | 2% -> 10% |
+| v3.4 both | big, 5M, same starting points, team memory 60 steps | training | | | |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 

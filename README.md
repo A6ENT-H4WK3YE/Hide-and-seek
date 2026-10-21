@@ -20,7 +20,8 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | v3 | walk (half speed, silent) or run (full speed, heard by nearby enemies) | done |
 | v3.1 | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | done (tag `v3.1`; run stopped at 3.4M steps) |
 | v3.2 | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | done (seekers dominate) |
-| **v3.3** | hiders pay a small cost for making noise, and are retrained alone against the frozen v3.2 seekers | **current**, training |
+| v3.3 | hiders pay a small cost for making noise, and are retrained alone against the frozen v3.2 seekers | done (the new hiders beat the old seekers) |
+| **v3.4** | the team's "searched recently" memory lasts a minute instead of 10 seconds; both teams learn again from their trained networks | **current**, training |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -80,7 +81,7 @@ Check and preview any map (also confirms every walkable cell is reachable):
 python preview_map.py maps/three_sites.txt
 ```
 
-## Rules (v3.3)
+## Rules (v3.4)
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
 - **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and whether to switch between walking and running (the mode stays until switched; every round starts walking).
@@ -166,7 +167,7 @@ wall, a teammate or an enemy. This is the layout in front of it, like a very low
 **Enemies heard:** up to 5 enemies heard running, nearest first: which direction and how far (walking distance).
 
 **Minimap:** the whole map shrunk to 12 x 12, with walls, itself, teammates, where **its team** searched recently
-(inside anyone's cone in the last 10 steps, shared, fading) and its own "last seen enemy" memory.
+(inside anyone's cone in the last 60 steps, shared, fading) and its own "last seen enemy" memory.
 Same size on every map, so a network trained on the tiny map can move to the big one.
 
 **Plus 7 numbers:** its position, which way it looks, how far through the round it is, whether it's still the hiding phase, and whether it's running.

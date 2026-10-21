@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3.3"
+GAME_VERSION = "v3.4"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -47,8 +47,8 @@ HEARING_FRACTION = 0.25 # an enemy running (and moving) is heard within this str
                         # Sound goes through walls (v3 / v3.1 used 6 cells of walking distance, which walls blocked)
 
 # ---------- team search memory and minimap ----------
-SEARCH_MEMORY_STEPS = 10  # shared "searched recently" marks fade to 0 over this many steps
-                          # (think of a step as about a second, so roughly 10 seconds)
+SEARCH_MEMORY_STEPS = 60  # shared "searched recently" marks fade to 0 over this many steps (about a minute; v3.4,
+                          # was 10: on a 250-step round seekers forgot everything searched more than 10 s ago)
 MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SIZE for every agent
 
 # ---------- rewards ----------

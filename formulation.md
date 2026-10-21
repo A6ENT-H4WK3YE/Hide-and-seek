@@ -287,6 +287,21 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
 - **Next run (same v3.3 rules): both teams learn again**, seekers starting from the final v3.2 network and hiders from
   the v3.3 network above (`START_FROM` in config). At the start the seekers win only about 2% of self-play.
 
+### v3.4: the team's "searched recently" memory lasts about a minute (60 steps instead of 10)
+- **What changed:** only `SEARCH_MEMORY_STEPS`, 10 -> 60. Each map cell inside a teammate's cone is marked 1 and now
+  fades by 1/60 per step instead of 1/10, so the minimap shows what the team searched in the last minute.
+  No reward changes. Everything else is v3.3.
+- **Why (Moeez):** seekers left dead zones (in v3.2 they barely visited site A) and seemed not to know where they had
+  already been. They had the memory, but it vanished after 10 steps, while a round lasts 250: by the time a seeker
+  crossed the map it had forgotten what it searched. This gives them the information instead of paying them to explore.
+- **Considered and kept in reserve:** an exploration reward. A plain bonus for new ground would change the best
+  strategy (touring the map instead of hunting), which is tweaking rewards for a result. If dead zones remain, the valid
+  version is potential-based shaping (reward when team coverage rises, paid back when it fades), which provably does not
+  change the best strategy, only how fast it is found.
+- **Run:** both teams learn, seekers starting from the final v3.2 network and hiders from the v3.3 network (`START_FROM`).
+  The previous run with these starting points (`runs/v3.3_both_*`) was stopped at 213k steps to make this change; seekers
+  had gone from 2% to 10% of self-play by then.
+
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.
   This changes how agents learn, not what the game is, so it does not get a game version.
