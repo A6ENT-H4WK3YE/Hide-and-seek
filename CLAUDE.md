@@ -47,7 +47,7 @@ agents playing in a 3D world. The goal can grow later.
 Roadmap:
 1. v1: grid world (done, see results)
 2. v2: continuous space with cone vision (built on branch `v2-continuous`, v2.1 results below)
-3. **v3: walk vs run with sound (built, first big-map run under way)**
+3. **v3: walk vs run with sound (built, first big-map run done, see results)**
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
 6. Continuous time (positions follow differential equations)
@@ -160,6 +160,20 @@ python evaluate.py runs/<run>/checkpoints/latest.pt
     so they partly split up. Most catches happen around site A and the top corridor.
   - seekers still strafe most of the time (73% of moves), and lock on when they see the hider (forward 71% of those steps).
 - Fewer hiders spotted per step than on the tiny map (6.5% in self-play), so hiding by staying out of sight works here.
+
+**2v1, big map, v3 sound (`runs/v3_three_sites_2v1_20261021_003603`, 5M steps, about 1h40):**
+- Seekers' win rate, 300 games each: trained seekers v random hider 71% (chaser bots 96%); trained seekers v fleeing bot
+  **74%** (v2.1: 37%, chaser bots 80%); chaser bot v trained hiders **94%** (random hider 96%, fleeing bot 80%); self-play 85% (v2.1: 37%).
+- Seekers learned to use sound and to chase properly: they run 92% of the time, walk forward 76% of moves (the strafing and
+  backpedalling quirk is gone on its own), and walk forward on 99% of steps when they see the hider. In 2,262 steps of
+  150 games a seeker heard the hider without seeing it.
+- Hiders did **not** learn to be quiet: they run 79% of the time and keep moving 91% of the time even with no seeker around.
+  When they hear a seeker they always run (100%), and the seeker still closes in (-0.1 units per step).
+- Test: the same trained hiders **forced to walk** drop the seekers' self-play win rate from 77% to **48%**. So silence would
+  help them a lot; they just never discovered it (a learning problem, not a game problem). Seekers took off after about 2M
+  steps and from then on hiders lose most games, similar to the "learned helplessness" seen in v1.
+- Hiders switched side: in v2.1 they went to site A, now mostly site C (38% of hunting time) and the right-hand corridors,
+  never A. Catches happen mostly around C and the right lane.
 
 **Bugs and lessons found along the way:**
 - Minibatch NaN crash: a leftover minibatch of size 1 made the advantage standard deviation NaN.

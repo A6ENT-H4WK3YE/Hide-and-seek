@@ -264,3 +264,7 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   bots 70%) and the fleeing bot 37% (chaser bots 51%); self-play 37%. Hiders mostly rotate to site A and the corridors next to it,
   rarely to B in the middle; seekers push up the middle, then spread to the sites. On the tiny map a searching seeker finds you
   almost anywhere, which is probably why hiders only learned on the big map.
+- **2v1, three_sites, v3 (sound, 5M steps):** seekers learned to use sound and chase (74% against the fleeing bot, v2.1: 37%;
+  self-play 85%). Hiders did not learn to be quiet: they run 79% of the time and keep moving even with nobody around, and the
+  chaser bot catches them 94% (random hider 96%). Forcing the same trained hiders to walk cuts the seekers' self-play win rate
+  from 77% to 48%, so walking would pay; hiders just never found it. Hiders moved from site A (v2.1) to site C.
