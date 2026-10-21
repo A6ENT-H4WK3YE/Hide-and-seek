@@ -3,6 +3,18 @@
 Read this first. It is the project memory: what we are building, what has happened so far, what comes
 next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 
+## Where we left off (2026-10-21, end of session)
+
+- Branch `v2-continuous`, game version **v3.1** (walk / run toggle starting in walk + opponent pool spanning the whole run),
+  default map `three_sites.txt`, 2v1, 5M steps, 16 game workers.
+- The v3.1 run was **stopped by Moeez at 539k of 5M steps** (`runs/v3.1_three_sites_2v1_20261021_032009`, checkpoint saved).
+  `train.py` has no resume, so the next step is simply to start it again: `caffeinate -i python train.py` (about 45 minutes).
+  Ignore the earlier partial folder `runs/v3.1_three_sites_2v1_20261021_030037` (stopped at 490k, before the workers).
+- After the run: same analysis as for v3 (evaluate.py, run / walk use, what hiders do when they hear a seeker, the
+  forced-walk test, heatmaps), then compare with v3.
+- Queued after that, one change each: team spotting (v3.2), aim reward + anti-farming fix for 250-step rounds (v3.3).
+  Optional speed-up: run the bot benchmarks in the workers too (about 10 minutes of a 5M run).
+
 ## Who you are working with
 
 Moeez (Muhammad Moeez), PhD student in Data-Driven Engineering and Science at the University of Bristol.
