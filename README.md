@@ -19,7 +19,7 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | big map | training on `three_sites.txt` (3 sites, mid, lanes), 250-step rounds | done, now the default |
 | v3 | walk (half speed, silent) or run (full speed, heard by nearby enemies) | done |
 | v3.1 | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | done (tag `v3.1`; run stopped at 3.4M steps) |
-| **v3.2** | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | **current**, training |
+| **v3.2** | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | **current**, trained (seekers dominate) |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -33,6 +33,8 @@ Seekers' win rate over 300 games per matchup, 2 seekers v 1 hider. "Chaser" and 
 | v2.1, tiny | 96% | 67% (chaser 79%) | 91% (random hider 88%) | 86% |
 | v2.1, big map | 77% (random seekers 1%) | 37% (chaser 51%) | **54%** (random hider 70%, fleeing bot 51%) | 37% |
 | v3, big map | 71% | **74%** (chaser 80%) | 94% (random hider 96%) | 85% |
+| v3.1, big map (stopped at 3.4M steps) | 84% | 41% (chaser 80%) | **87%** (random hider 96%) | 31% |
+| v3.2, big map | 99% | 76% (chaser 91%) | 99% (random hider 100%) | 98% |
 
 Bot strength changes between versions (from v3 the bots also hear), so compare each trained number with the bot numbers in the same row.
 
@@ -42,6 +44,7 @@ What the agents learned:
 - **Hiders only learned on the big map.** On the 11 x 11 map a searching seeker finds you anywhere. On `three_sites.txt` hiders learned to hide about as well as the scripted fleeing bot, and picked a side: they rotated to site A, while seekers pushed straight up the middle and then spread to the sites.
 - **Sound helped the seekers far more than the hiders.** In v3 seekers learned to run, listen and chase (they beat the fleeing bot 74% of the time, up from 37%), and their strafing habit disappeared. Hiders kept running and gave themselves away. Forcing the same trained hiders to walk cut the seekers' win rate from 77% to 48%, so silence pays, they just never discovered it. v3.1 makes walking a mode you switch, so staying quiet takes one decision instead of one every step.
 - **Teams pick a side, and it moves.** Hiders favoured site A in v2.1 and site C in v3.
+- **Sound through walls helps the hunters.** In v3.2 two seekers listening for one hider won 98% of games. Seekers learned to hold their walk / run mode; hiders kept flipping it almost every step, so they made noise half the time. v3.1 (sound blocked by walls) was the most balanced game so far (31%).
 
 Insights so far:
 

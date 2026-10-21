@@ -297,3 +297,11 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   self-play 85%). Hiders did not learn to be quiet: they run 79% of the time and keep moving even with nobody around, and the
   chaser bot catches them 94% (random hider 96%). Forcing the same trained hiders to walk cuts the seekers' self-play win rate
   from 77% to 48%, so walking would pay; hiders just never found it. Hiders moved from site A (v2.1) to site C.
+- **2v1, three_sites, v3.1 (stopped at 3.4M steps, evaluated with its own hearing rule):** the most balanced run so far.
+  Seekers win 31% of self-play; the chaser bot catches trained hiders 87% (random hider 96%, fleeing bot 80%); trained
+  seekers beat the fleeing bot 41% (chaser bots 80%).
+- **2v1, three_sites, v3.2 (sound through walls, 5M steps):** seekers win 98% of self-play, 99% against random hiders and 76%
+  against the fleeing bot (chaser bots 91%); the chaser bot catches trained hiders 99% (random hider 100%). Seekers hold
+  their walk / run mode (press switch on 13% of steps); hiders do not (61%), so they make noise about half the time and the
+  seekers hear them through walls. The toggle did not do its job for hiders because an untrained network presses switch
+  half the time; next idea: start the switch head biased towards "keep".

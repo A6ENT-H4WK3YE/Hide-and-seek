@@ -4,25 +4,26 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-21, afternoon)
+## Where we left off (2026-10-21, evening)
 
-- Branch `main`, game version **v3.2**, map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers,
-  ray casting compiled with numba (installed on the Mac: numba 0.60.0; game step 1.19 -> 0.40 ms, identical results).
-  Training is about 1,730 steps/s on the Mac; the learning step (PPO update, about 0.7 s of each 1.1 s update) is now
-  the biggest cost, not the game.
-- **v3.2 training run started** (sound through walls, range a quarter of the map's longer side = 11.25 on three_sites).
-- The v3.1 run was stopped at 3.4M of 5M steps (`runs/v3.1_three_sites_2v1_20261021_161950`, checkpoint saved) when
-  Moeez spotted that sound could not go through walls. Seekers were winning only about 30% of self-play by then
-  (v3: 85%). Not evaluated yet; it can still be evaluated as a partial v3.1 result.
-- After the v3.2 run: the same analysis as for v3 (evaluate.py with 300 games per matchup, how often each team runs,
-  what hiders do when they hear a seeker, the forced-walk test, heatmaps), then compare with v3 (and the partial v3.1).
-  Those analysis scripts lived in the scratchpad; rebuild them or add an `analyse.py` (offered, not decided).
-- Queued, one change each, in this order:
-  1. **v3.3: double the win / loss reward** (10 -> 20) so the round result counts for more (a hider's win only comes at
-     step 250, heavily discounted). Also fixes the anti-farming margin (watching a whole round about +20 v catching about +40).
-  2. **Team spotting:** enemies a teammate sees or hears show up in my slots, and the "last seen enemy" memory is shared.
-  3. **Aim reward:** the "in sight" reward also grows with how centred the hider is.
-  4. Optional: bot benchmarks in the workers; maybe a faster learning step.
+- Branch `main`, game version **v3.2** (sound through walls, range 0.25 x the map's longer side = 11.25 on three_sites),
+  map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers, ray casting compiled with numba
+  (Mac: game step 1.19 -> 0.40 ms, training about 1,500 to 1,730 steps/s; the PPO update is now the biggest cost).
+- **v3.2 run done and analysed** (`runs/v3.2_three_sites_2v1_20261021_170702`): seekers dominate (self-play 98%).
+  The partial v3.1 run (3.4M steps) was also evaluated: much more balanced (self-play 31%). See results below.
+- **Key finding:** the walk / run toggle did not make hiders quiet. They press "switch" on 37% (v3.1) to 61% (v3.2) of
+  steps, so their mode is close to a coin flip and they run about half the time. v3.2 seekers did learn to hold a
+  mode (switch on 13% of steps). An untrained network presses "switch" half the time, which cancels the whole point
+  of a toggle (staying quiet should be the easy default).
+- **Proposed next (not yet agreed with Moeez), one change each:**
+  1. Start the switch head biased towards "keep" (for example a 5% chance of switching at the start of training), so
+     an untrained hider stays in its mode (walking) for long stretches and can discover that silence pays. Training /
+     model change only; the game stays v3.2.
+  2. **v3.3: double the win / loss reward** (10 -> 20): the round result counts for more, and the anti-farming margin
+     is restored (watching a whole round about +20 v catching about +40).
+  3. Then team spotting, then the aim reward. Optional: bot benchmarks in the workers; a faster learning step.
+- Analysis scripts (evaluate, sound use, hider reactions, forced walk, lock-on, teamwork, switch rate, heatmaps) still
+  live in the scratchpad; Moeez has been offered an `analyse.py` in the repo and not decided.
 
 ## Who you are working with
 
@@ -83,7 +84,7 @@ agents playing in a 3D world. The goal can grow later.
 Roadmap (status):
 1. v1: grid world, 360 degree vision. **Done** (tag `v1-grid`).
 2. v2: continuous space, 90 degree vision cone, catch by distance and facing. **Done.**
-3. v3: walk vs run with sound. **Built; v3.2 (sound through walls) is current and training.**
+3. v3: walk vs run with sound. **Built; v3.2 (sound through walls) is current; hiders still need to learn to stay quiet.**
 4. Bigger map and bigger teams. **Big map done** (`three_sites.txt` is the default since v2.1); bigger teams not yet.
 5. Team spotting and aim (next), then continuous turning, learned memory (GRU), communication between teammates.
 6. Continuous time (positions follow differential equations).
@@ -176,8 +177,8 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v2.1 | tiny, 2M | 96% | 67% (chaser 79%) | 91% (random hider 88%) | 86% |
 | v2.1 | big, 5M | 77% (random seekers 1%, chaser 70%) | 37% (chaser 51%) | **54%** (random hider 70%, fleeing bot 51%) | 37% |
 | v3 | big, 5M | 71% (chaser 96%) | **74%** (chaser 80%) | 94% (random hider 96%, fleeing bot 80%) | 85% |
-| v3.1 | big, 3.4M (stopped) | not evaluated yet; self-play was about 30% when stopped | | | |
-| v3.2 | big, 5M | training | | | |
+| v3.1 | big, 3.4M (stopped) | 84% (chaser 96%) | 41% (chaser 80%) | **87%** (random hider 96%, fleeing bot 80%) | 31% |
+| v3.2 | big, 5M | 99% (chaser 100%) | 76% (chaser 91%) | 99% (random hider 100%, fleeing bot 88%) | 98% |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 
@@ -198,6 +199,18 @@ What the agents did (measured, not just watched):
   Hiders run 79% of the time, keep moving 91% even with nobody around, and when they hear a seeker they always run,
   but it still closes in. Hiders switched to **site C** and the right-hand corridors. **Forced-walk test:** the same
   trained hiders forced to walk cut the seekers' self-play win rate from 77% to 48%.
+- **v3.1 (partial, 3.4M steps, evaluated under its own hearing rule of 6 cells walking):** the most balanced run so far.
+  Self-play 31%, the chaser bot catches trained hiders 87% (random hider 96%); trained seekers beat the fleeing bot only
+  41%. Both teams were in run mode about half the time (hiders press "switch" on 37% of steps). Forcing hiders to walk
+  no longer helped (43% -> 52% seeker wins), so their running was not the main weakness any more.
+- **v3.2 big map (sound through walls):** seekers took off after about 1M steps and won 98% of self-play. They learned to
+  hold their walk / run mode (switch on 13% of steps, in run mode 54%), keep a seen hider in view 89% of the next steps
+  (v3: 74%) and travel as a pair (median 5.7 units apart; v3: 10.8). Hiders flip their mode constantly (switch on 61% of
+  steps, making noise 46% of hunting steps) and are caught by the chaser bot 99% (random hider 100%). Seekers heard the
+  hider without seeing it in 1,747 steps of 150 games. When a hider hears a seeker it always moves, but the seeker
+  closes in (-0.3 units per step). Forced-walk test: 99% -> 89%. Hiders spend the hunt in corridors (57%), site C (27%),
+  never site A. Still no teamwork: while one seeker sees the hider, the other walks +0.06 cells closer per step
+  (when nobody sees it, +0.36).
 - **Seeker problems Moeez spotted (v3, measured):** sloppy lock-on (they turn towards a seen hider 87% of the time but
   pick the centring turn only 39%; the hider drifts from 19 to 30 degrees off-centre per step and is lost 26% of the
   time) and no teamwork (while one seeker sees the hider, the other walks 0.07 cells closer per step, less than its
@@ -215,6 +228,11 @@ What the agents did (measured, not just watched):
   Anywhere in the cone pays the same, so they do not bother to centre the target (the aim reward is for that).
 - **Free movement rules create odd habits.** With equal speed in every direction, seekers strafed and backpedalled;
   once running and sound existed, they ran forward instead, without any change aimed at that.
+- **A toggle only helps if the untrained network actually holds it.** A fresh network presses "switch" half the time,
+  so the mode flips almost every step. Seekers (who win and get clear feedback) learned to hold their mode; hiders
+  never did, so they kept making noise at random.
+- **Sound through walls helps whoever is hunting.** Two seekers listening for one hider, plus a hider that cannot
+  control its noise, turned a balanced game (v3.1, 31%) into a seeker walkover (v3.2, 98%).
 - **A new mechanic can help one side far more.** Sound mostly helped seekers: they learned to listen, hiders never
   learned to be quiet. The forced-walk test showed the game was fine and the learning was the problem, which led to
   the walk toggle (one decision keeps you quiet, instead of a fresh coin flip every step).
