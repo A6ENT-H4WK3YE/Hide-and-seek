@@ -264,6 +264,23 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   seekers were winning only about 30% of self-play games by then (v3: 85%), so the walk toggle and the longer pool
   probably helped hiders. Not evaluated yet.
 
+### v3.3: hiders pay a small cost for making noise (trained alone, against frozen v3.2 seekers)
+- **What changed in the game:** hiders lose 0.02 (`HIDER_NOISE_COST`) every step a hider runs and moves. Seekers' rewards
+  are unchanged, so the game is **no longer exactly zero-sum**: this cost is a hint for the hiders, not a rule of the
+  match. Everything else is v3.2.
+- **Training changes made at the same time (Moeez agreed to all three together, so the result cannot be split):**
+  - **only the hiders learn** (`TRAIN_TEAMS = ["hiders"]`). The seekers are frozen: the final v3.2 seekers play in normal
+    games, and 17 of the v3.2 run's saved checkpoints (from a random network to the final one) are their opponent pool,
+    so new hiders also meet seekers they can beat.
+  - the walk / run switch starts biased towards "keep" (`SWITCH_KEEP_PROB = 0.95`: an untrained network switches 5% of
+    the time instead of 50%).
+  - the hiders start from scratch.
+- **Why (Moeez):** fix the hiders first. In v3.2 they pressed switch on 61% of steps, so they ran about half the time and
+  the seekers heard them through walls (seekers won 98%). Retraining both teams would just let the seekers win again;
+  a quiet, balanced hider comes first, then both teams train together again, then team spotting.
+- **Not chosen:** a reward for being far from seekers (hiders cannot observe distance when they neither see nor hear
+  a seeker, and it would teach running to corners instead of hiding).
+
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.
   This changes how agents learn, not what the game is, so it does not get a game version.

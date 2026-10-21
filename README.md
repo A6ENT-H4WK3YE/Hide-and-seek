@@ -19,7 +19,8 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | big map | training on `three_sites.txt` (3 sites, mid, lanes), 250-step rounds | done, now the default |
 | v3 | walk (half speed, silent) or run (full speed, heard by nearby enemies) | done |
 | v3.1 | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | done (tag `v3.1`; run stopped at 3.4M steps) |
-| **v3.2** | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | **current**, trained (seekers dominate) |
+| v3.2 | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | done (seekers dominate) |
+| **v3.3** | hiders pay a small cost for making noise, and are retrained alone against the frozen v3.2 seekers | **current**, training |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -79,7 +80,7 @@ Check and preview any map (also confirms every walkable cell is reachable):
 python preview_map.py maps/three_sites.txt
 ```
 
-## Rules (v3.2)
+## Rules (v3.3)
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
 - **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and whether to switch between walking and running (the mode stays until switched; every round starts walking).
@@ -89,7 +90,7 @@ python preview_map.py maps/three_sites.txt
 - **Vision:** a 90 degree cone, no range limit, blocked by walls. Enemies are checked exactly (straight line between centres). A seeker can see a hider's back without being seen.
 - **Catch:** a seeker catches a hider it can see within 0.8 units, if the hider is within 30 degrees of where the seeker looks.
 - **Round end:** 250 steps on the big map, 100 on the tiny one (hiders win if any survive), or all hiders caught (seekers win).
-- **Reward (team based, zero-sum):** seekers get a little each step a hider is in sight (more when closer) and lose a little each step none is; +10 per catch; +10 plus a bonus for time left when all are caught; -10 if hiders survive. Hiders get exactly the opposite. Full details in `formulation.md`.
+- **Reward (team based, zero-sum):** seekers get a little each step a hider is in sight (more when closer) and lose a little each step none is; +10 per catch; +10 plus a bonus for time left when all are caught; -10 if hiders survive. Hiders get exactly the opposite, plus (since v3.3) a small cost for every step they make noise. Full details in `formulation.md`.
 
 ## Approach
 

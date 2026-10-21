@@ -4,26 +4,23 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-21, evening)
+## Where we left off (2026-10-21, night)
 
-- Branch `main`, game version **v3.2** (sound through walls, range 0.25 x the map's longer side = 11.25 on three_sites),
-  map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers, ray casting compiled with numba
-  (Mac: game step 1.19 -> 0.40 ms, training about 1,500 to 1,730 steps/s; the PPO update is now the biggest cost).
-- **v3.2 run done and analysed** (`runs/v3.2_three_sites_2v1_20261021_170702`): seekers dominate (self-play 98%).
-  The partial v3.1 run (3.4M steps) was also evaluated: much more balanced (self-play 31%). See results below.
-- **Key finding:** the walk / run toggle did not make hiders quiet. They press "switch" on 37% (v3.1) to 61% (v3.2) of
-  steps, so their mode is close to a coin flip and they run about half the time. v3.2 seekers did learn to hold a
-  mode (switch on 13% of steps). An untrained network presses "switch" half the time, which cancels the whole point
-  of a toggle (staying quiet should be the easy default).
-- **Proposed next (not yet agreed with Moeez), one change each:**
-  1. Start the switch head biased towards "keep" (for example a 5% chance of switching at the start of training), so
-     an untrained hider stays in its mode (walking) for long stretches and can discover that silence pays. Training /
-     model change only; the game stays v3.2.
-  2. **v3.3: double the win / loss reward** (10 -> 20): the round result counts for more, and the anti-farming margin
-     is restored (watching a whole round about +20 v catching about +40).
-  3. Then team spotting, then the aim reward. Optional: bot benchmarks in the workers; a faster learning step.
-- Analysis scripts (evaluate, sound use, hider reactions, forced walk, lock-on, teamwork, switch rate, heatmaps) still
-  live in the scratchpad; Moeez has been offered an `analyse.py` in the repo and not decided.
+- Branch `main`, game version **v3.3**, map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers,
+  ray casting compiled with numba.
+- **v3.3 run started: hiders only** (`TRAIN_TEAMS = ["hiders"]`) against frozen v3.2 seekers (final network in normal
+  games, 17 checkpoints from the v3.2 run as their pool), hiders from scratch with a 0.02 noise cost and the walk / run
+  switch starting at 95% "keep". About 2,500 steps/s (only one team learns), so about 35 minutes.
+- Why: v3.2 seekers won 98%. Hiders pressed switch on 61% of steps (an untrained network switches half the time, which
+  cancels the point of a toggle), so they ran half the time and were heard through walls. Moeez: fix the hiders first,
+  keep the seekers, then train both together again, then team spotting.
+- After the run, check: does the hider hold walk mode (switch rate, time in run mode, noise per hunting step), how often
+  it survives against the final v3.2 seekers (self-play win rate in metrics.csv counts only games against the final
+  seekers), evaluate.py, forced-walk test, how hiders react when they hear a seeker, heatmaps.
+- Then, one change each: train both teams together again starting from the new hiders (and the v3.2 seekers);
+  v3.4 double the win / loss reward (also restores the anti-farming margin); team spotting; aim reward.
+- v3.2 and the partial v3.1 run are analysed (results below). Analysis scripts still live in the scratchpad
+  (an `analyse.py` in the repo was offered, not decided).
 
 ## Who you are working with
 
@@ -123,7 +120,7 @@ caffeinate -i python train.py        # full run (TOTAL_STEPS in config)
 python evaluate.py runs/<run>/checkpoints/latest.pt 300
 ```
 
-## The game now (v3.2, details in formulation.md)
+## The game now (v3.3, details in formulation.md)
 
 - Continuous 2D space. Every `#` of the map is a solid 1 x 1 square. Agents are circles (radius 0.3) with a position
   and a heading; they slide along walls and can overlap each other. 1 unit = 1 cell, 1 step = about 1 second.
@@ -136,12 +133,14 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
   through walls (v3.2; v3 and v3.1 used 6 cells of walking distance, which walls blocked).
 - Catch: in sight, centres within 0.8, hider within 30 degrees of where the seeker looks.
 - Rewards (seekers; hiders get exactly minus): +0.2 x closeness per step a hider is in sight, -0.05 per step none is,
-  +10 per catch, +10 plus up to +10 for time left when all are caught, -10 if hiders survive.
+  +10 per catch, +10 plus up to +10 for time left when all are caught, -10 if hiders survive. Since v3.3 hiders
+  also pay 0.02 for every step a hider makes noise (not zero-sum any more; a hint while seekers are frozen).
 - Round: 250 steps with a 30-step hiding phase on the big map (100 and 15 on the tiny map). 2 seekers v 1 hider.
 - Each agent observes: rays, enemies in sight, enemies heard, 7 numbers (position, heading, time, hiding phase,
   running) and a 12 x 12 minimap (walls, me, teammates, team "searched recently", own "last seen enemy" memory).
-- Training: PPO, one network per team, both teams learning (self-play), half the games against frozen past
-  versions from a pool that spans the whole run.
+- Training: PPO, one network per team. Normally both teams learn (self-play), with half the games against frozen past
+  versions from a pool that spans the whole run. `TRAIN_TEAMS` can freeze a team: it then plays with an earlier run's
+  networks (`FROZEN_RUN`), its final network plus its checkpoints as the pool. The walk / run switch starts at 95% "keep".
 
 ## How we got here: versions, ideas and fixes
 
@@ -158,6 +157,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
+| v3.3 | hiders pay 0.02 per noisy step; only hiders learn, against frozen v3.2 seekers (final + 17 checkpoints as pool); switch starts at 95% "keep" (all together, agreed) | v3.2 seekers won 98%; hiders flipped walk / run constantly and were heard through walls. Moeez: fix the hiders first |
 
 Decisions behind v2 (agreed 2026-10-20): fixed set of 9 turns (continuous turning is a later experiment); catch 0.8 and
 30 degrees and in sight; radius 0.3, speed 1 for every direction; agents pass through each other; turn then move;
@@ -179,6 +179,7 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3 | big, 5M | 71% (chaser 96%) | **74%** (chaser 80%) | 94% (random hider 96%, fleeing bot 80%) | 85% |
 | v3.1 | big, 3.4M (stopped) | 84% (chaser 96%) | 41% (chaser 80%) | **87%** (random hider 96%, fleeing bot 80%) | 31% |
 | v3.2 | big, 5M | 99% (chaser 100%) | 76% (chaser 91%) | 99% (random hider 100%, fleeing bot 88%) | 98% |
+| v3.3 | big, 5M, hiders only v frozen v3.2 seekers | (seekers frozen) | (seekers frozen) | training | training |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 

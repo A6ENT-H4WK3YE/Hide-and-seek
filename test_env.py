@@ -236,6 +236,15 @@ _, rewards, _, _ = env.step([STAY], [STAY])
 check(f"no hider in sight: seekers {cfg.REWARD_UNSEEN}, hiders {-cfg.REWARD_UNSEEN}",
       close(rewards["seekers"][0], cfg.REWARD_UNSEEN) and close(rewards["hiders"][0], -cfg.REWARD_UNSEEN))
 
+place(env, seekers=[(8.5, 1.5, 0)], hiders=[(1.5, 2.5, 0)], t=HUNT)
+_, rewards, _, _ = env.step([STAY], [FORWARD])     # hider runs (in run mode and moving): makes noise
+check(f"a running hider pays the noise cost: hiders get {-cfg.REWARD_UNSEEN} - {cfg.HIDER_NOISE_COST}, seekers unaffected",
+      env.hider_noisy[0] and close(rewards["seekers"][0], cfg.REWARD_UNSEEN)
+      and close(rewards["hiders"][0], -cfg.REWARD_UNSEEN - cfg.HIDER_NOISE_COST))
+place(env, seekers=[(8.5, 1.5, 0)], hiders=[(1.5, 2.5, 0)], t=HUNT, running=False)
+_, rewards, _, _ = env.step([STAY], [FORWARD])     # same move, walking: silent, no cost
+check("a walking hider pays nothing extra (zero-sum again)", rewards["hiders"][0] == -rewards["seekers"][0])
+
 place(env, seekers=[(7.5, 2.5, 180)], hiders=[(2.5, 2.5, 0)], t=HUNT)
 _, rewards, _, _ = env.step([STAY], [STAY])
 expected = cfg.REWARD_SEEN * (1 - 5 / cfg.CLOSENESS_RANGE)

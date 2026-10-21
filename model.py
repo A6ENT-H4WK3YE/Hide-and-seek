@@ -62,6 +62,9 @@ class TeamNet(nn.Module):
         self.move_head = layer_init(nn.Linear(cfg.HIDDEN, cfg.N_MOVES), gain=0.01)
         self.turn_head = layer_init(nn.Linear(cfg.HIDDEN, cfg.N_TURNS), gain=0.01)
         self.speed_head = layer_init(nn.Linear(cfg.HIDDEN, cfg.N_SPEEDS), gain=0.01)
+        # start out mostly pressing "keep", so the walk / run mode stays put while the network is still untrained
+        with torch.no_grad():
+            self.speed_head.bias.copy_(torch.log(torch.tensor([cfg.SWITCH_KEEP_PROB, 1 - cfg.SWITCH_KEEP_PROB])))
         self.critic = layer_init(nn.Linear(cfg.HIDDEN, 1), gain=1.0)
 
     def forward(self, obs):

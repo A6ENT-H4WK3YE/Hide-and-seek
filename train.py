@@ -23,6 +23,7 @@ import csv
 import copy
 import time
 import datetime
+from glob import glob
 import subprocess
 from collections import deque
 
@@ -88,6 +89,9 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- rewards (seekers; hiders get minus): seen {cfg.REWARD_SEEN:+} x closeness, unseen {cfg.REWARD_UNSEEN:+}, "
             f"per catch {cfg.REWARD_CATCH:+}, win {cfg.REWARD_WIN:+} plus up to {cfg.REWARD_TIME_BONUS:+} for time left, "
             f"loss {cfg.REWARD_LOSS:+}\n")
+    f.write(f"- learning: {', '.join(cfg.TRAIN_TEAMS)}"
+            + (f" (the others are frozen, loaded from {cfg.FROZEN_RUN})" if len(cfg.TRAIN_TEAMS) < 2 else " (self-play)")
+            + f"; hider noise cost {cfg.HIDER_NOISE_COST}, switch starts at keep {cfg.SWITCH_KEEP_PROB:.0%}\n")
     f.write(f"- total steps: {total_steps:,}\n\n")
     f.write("## All settings\n\n")
     for k, v in settings.items():
@@ -107,21 +111,39 @@ game_alive = np.ones((E, cfg.N_HIDERS), dtype=bool)             # which hiders a
 eval_env = HideSeekEnv(cfg.MAP_FILE)
 
 nets = {team: TeamNet().to(device) for team in TEAMS}
-opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, eps=1e-5) for team in TEAMS}
+opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, eps=1e-5) for team in cfg.TRAIN_TEAMS}
 
 # ---------- opponent pool ----------
 # pool[team] holds frozen snapshots of that team's network from earlier in training.
 # past_nets[team] is the snapshot that team plays with, in games where it is "frozen".
-pool = {team: [copy.deepcopy(nets[team].state_dict())] for team in TEAMS}
+pool = {team: [copy.deepcopy(nets[team].state_dict())] for team in cfg.TRAIN_TEAMS}
 snapshot_every = cfg.SNAPSHOT_EVERY     # doubles each time the pool fills up (see the main loop)
 past_nets = {team: TeamNet().to(device) for team in TEAMS}
 pool_rng = np.random.default_rng(cfg.SEED + 1)
+
+# ---------- teams that do not learn ----------
+# They play with the networks an earlier run saved: its final network in normal games, and up to POOL_SIZE of its
+# checkpoints, spread from the start of that run (weak) to the end (strong), as their opponent pool.
+FROZEN_TEAMS = [team for team in TEAMS if team not in cfg.TRAIN_TEAMS]
+if FROZEN_TEAMS:
+    frozen_ckpts = sorted(glob(os.path.join(cfg.FROZEN_RUN, "checkpoints", "ckpt_*.pt")))
+    picks = np.unique(np.linspace(0, len(frozen_ckpts) - 1, min(cfg.POOL_SIZE, len(frozen_ckpts))).round().astype(int))
+    latest = torch.load(os.path.join(cfg.FROZEN_RUN, "checkpoints", "latest.pt"), map_location=device, weights_only=False)
+    loaded = [torch.load(frozen_ckpts[i], map_location=device, weights_only=False) for i in picks]
+    for team in FROZEN_TEAMS:
+        nets[team].load_state_dict(latest[team])
+        nets[team].eval()
+        pool[team] = [ck[team] for ck in loaded]
+    print(f"frozen {', '.join(FROZEN_TEAMS)} from {cfg.FROZEN_RUN}: final network, plus {len(picks)} checkpoints "
+          f"(games {loaded[0]['games']:,} to {loaded[-1]['games']:,}) as their pool")
+# in each game, at most one team plays as a past version: either team in self-play, only a frozen team otherwise
+POOL_TEAMS = FROZEN_TEAMS if FROZEN_TEAMS else TEAMS
 
 
 def pick_frozen_team():
     # for a new game: None (both teams current, normal self-play) or the team that plays as a past version
     if cfg.OPPONENT_POOL and pool_rng.random() < cfg.POOL_PROB:
-        return str(pool_rng.choice(TEAMS))
+        return str(pool_rng.choice(POOL_TEAMS))
     return None
 
 
@@ -378,7 +400,8 @@ with open(bots_csv, "w", newline="") as f:
 start_time = time.time()
 print(f"training for {total_steps:,} steps ({E} games in parallel, {E * T:,} steps per update)")
 if cfg.OPPONENT_POOL:
-    print(f"opponent pool on: {cfg.POOL_PROB:.0%} of games use a past version of one team\n")
+    print(f"opponent pool on: {cfg.POOL_PROB:.0%} of games use a past version of "
+          + ("one team\n" if not FROZEN_TEAMS else f"the frozen {', '.join(FROZEN_TEAMS)}\n"))
 else:
     print("opponent pool off: plain self-play\n")
 
@@ -422,9 +445,10 @@ try:
             for e in range(E):
                 hunting, alive_before = hunting_before[e], alive_before_all[e]
                 o, r, done, info = new_obs[e], rewards[e], dones[e], infos[e]
-                # frozen past versions don't learn, so their steps never count
-                buf["seekers"]["valid"][t, e] = float(hunting and frozen_team[e] != "seekers")
-                buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32) * float(frozen_team[e] != "hiders")
+                # frozen past versions (and teams that do not learn at all) don't learn, so their steps never count
+                buf["seekers"]["valid"][t, e] = float(hunting and frozen_team[e] != "seekers" and "seekers" in cfg.TRAIN_TEAMS)
+                buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32) * float(
+                    frozen_team[e] != "hiders" and "hiders" in cfg.TRAIN_TEAMS)
 
                 newly_caught = alive_before & ~info["hider_alive"]
                 buf["seekers"]["reward"][t, e] = r["seekers"]
@@ -454,22 +478,22 @@ try:
             steps_done += E
 
         # ---------------- 2 + 3. advantages and PPO update, per team ----------------
-        stats = {}
-        for team in TEAMS:
+        stats = {team: {} for team in TEAMS}
+        for team in cfg.TRAIN_TEAMS:
             with torch.no_grad():
                 _, _, last_value = nets[team].act(to_device(stack_team(obs, team)))
             last_value = last_value.cpu().numpy().reshape(E, N_AGENTS[team])
             stats[team] = ppo_update(team, buf[team], last_value)
         update += 1
 
-        # every snapshot_every updates, freeze a copy of both teams into the pool.
+        # every snapshot_every updates, freeze a copy of each learning team into the pool.
         # When the pool is full, keep every second snapshot and take snapshots half as often from then on,
         # so the pool always covers the whole run evenly (old, weaker opponents included), not just the latest part.
         if cfg.OPPONENT_POOL and update % snapshot_every == 0:
-            for team in TEAMS:
+            for team in cfg.TRAIN_TEAMS:
                 pool[team].append(copy.deepcopy(nets[team].state_dict()))
-            if len(pool["seekers"]) > cfg.POOL_SIZE:
-                for team in TEAMS:
+            if len(pool[cfg.TRAIN_TEAMS[0]]) > cfg.POOL_SIZE:
+                for team in cfg.TRAIN_TEAMS:
                     pool[team] = pool[team][::2]
                 snapshot_every *= 2
                 print(f"  -> opponent pool full: kept every second snapshot, now one every {snapshot_every} updates")

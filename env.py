@@ -236,10 +236,12 @@ class HideSeekEnv:
 
         self._update_memory()
 
-        # zero-sum between teams: hiders always get exactly minus the seekers' reward
+        # zero-sum between teams: hiders get exactly minus the seekers' reward, except for the hiders' own noise cost
+        # (v3.3: a hint for hiders while the seekers are frozen; shared by the team like every other reward)
+        hider_r = -seeker_r - cfg.HIDER_NOISE_COST * float(self.hider_noisy.sum())
         rewards = {
             "seekers": np.full(self.n_seekers, seeker_r, dtype=np.float32),
-            "hiders": np.full(self.n_hiders, -seeker_r, dtype=np.float32),
+            "hiders": np.full(self.n_hiders, hider_r, dtype=np.float32),
         }
 
         info = {

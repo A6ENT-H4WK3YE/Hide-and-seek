@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3.2"
+GAME_VERSION = "v3.3"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -62,6 +62,8 @@ REWARD_CATCH = 10.0     # per catch
 REWARD_WIN = 10.0       # all hiders caught...
 REWARD_TIME_BONUS = 10.0  # ...plus up to this much more for the time left (earlier = bigger)
 REWARD_LOSS = -10.0     # hiders survive to the time limit
+HIDER_NOISE_COST = 0.02 # hiders only: they lose this every step a hider runs and moves (makes noise). This breaks the
+                        # zero-sum rule on purpose: it is a hint for the hiders while the seekers are frozen (v3.3)
 
 # ---------- actions ----------
 # every step each agent picks two things at once:
@@ -72,6 +74,8 @@ REWARD_LOSS = -10.0     # hiders survive to the time limit
 N_MOVES = 5
 N_TURNS = len(TURN_ANGLES)
 N_SPEEDS = 2
+SWITCH_KEEP_PROB = 0.95 # an untrained network presses "keep" this often (switches 5% of the time), so its walk / run
+                        # mode stays put for long stretches; with 50 / 50 the mode flipped almost every step
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
@@ -93,6 +97,13 @@ DEVICE = "cpu"          # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda
                         # choosing actions 16x slower on the Mac GPU, learning no faster)
 N_WORKERS = 16          # the games run in this many parallel processes (workers.py); one per game was fastest
                         # (6x faster game stepping than one process on a 15-core M5 Pro)
+
+# ---------- which teams learn ----------
+# Both teams learn by default (self-play). With only "hiders" here, the seekers are frozen: they play with the
+# networks saved by an earlier run (FROZEN_RUN), the final one in normal games and the run's earlier checkpoints
+# (from weak to strong) as the opponent pool, so the new hiders also meet seekers they can beat.
+TRAIN_TEAMS = ["hiders"]
+FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"
 
 # ---------- opponent pool (stops self-play going round in circles) ----------
 # Plain self-play can cycle: hiders pick a side, seekers learn that side, hiders switch, and so on.
