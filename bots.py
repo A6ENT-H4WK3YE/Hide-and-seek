@@ -7,8 +7,13 @@
 #   fleeing hider:  if it sees or hears a seeker (or did in the last few steps), runs backwards to wherever
 #                   is furthest along walkable paths, while still facing the seeker; otherwise stays put
 #                   (silent) and slowly looks around.
+#   escape hider:   a stress test for seekers that CHEATS: it always knows where every seeker is. Every step it
+#                   heads for the spot furthest from both seekers among those it can reach before any of them,
+#                   keeps facing the nearest seeker, walks (silent) while the seekers are out of earshot and runs
+#                   once one is within hearing range or can see it. Catching it means the seekers really hunt well.
 #
-# Both only use what a real agent could know: what is inside their own cone, what they can hear, plus their own memory.
+# The chaser and the fleeing hider only use what a real agent could know: what is inside their own cone, what they
+# can hear, plus their own memory. The escape hider does not (it is an upper bound for hiders, not a fair player).
 # Routes are planned on the grid of map cells underneath (shortest walking distance between cells),
 # then followed in continuous space by turning and walking.
 #
@@ -17,6 +22,7 @@
 #   bots.reset()                 after every env.reset()
 #   bots.seeker_actions()        one (move, turn, switch) triple per seeker
 #   bots.hider_actions()         one (move, turn, switch) triple per hider
+#   bots.escape_actions()        the same, for the cheating escape hider
 # (switch = 1 flips the walk / run mode; the bots switch whenever their mode is not the one they want)
 
 import numpy as np
@@ -148,4 +154,32 @@ class Bots:
             turn = self._turn_towards(heading, np.arctan2(threat[1] - pos[1], threat[0] - pos[0]))
             move = self._move_towards(heading + TURNS[turn], away) if np.hypot(*(goal - pos)) > 0.1 else 0
             actions.append([move, turn, self._switch(env.hider_running[j], RUN)])
+        return np.array(actions)
+
+    # ---------- escape hider (cheats: knows where every seeker is) ----------
+    def escape_actions(self):
+        env = self.env
+        # walking distance from every cell to the nearest seeker
+        danger = np.minimum.reduce([self.dist[cell_of(p)] for p in env.seekers])
+        actions = []
+        for j in range(env.n_hiders):
+            pos, heading = env.hiders[j], env.hider_heading[j]
+            if not env.hider_alive[j]:
+                actions.append([0, NO_TURN, 0])
+                continue
+            mine = self.dist[cell_of(pos)]
+            # cells I reach before any seeker; of those, the one furthest from the seekers (nearest to me on a tie)
+            safe = (mine < danger) & ~env.walls
+            score = np.where(safe if safe.any() else ~env.walls, danger - 0.01 * mine, -np.inf)
+            y, x = np.unravel_index(np.argmax(score), score.shape)
+            target = np.array([x + 0.5, y + 0.5])
+            want = self._route(pos, target)
+            nearest = min(env.seekers, key=lambda p: np.hypot(*(p - pos)))
+            near_d = np.hypot(*(nearest - pos))
+            # watch the nearest seeker while moving
+            turn = self._turn_towards(heading, np.arctan2(nearest[1] - pos[1], nearest[0] - pos[0]))
+            move = self._move_towards(heading + TURNS[turn], want) if np.hypot(*(target - pos)) > 0.3 else 0
+            # quiet while out of earshot, sprint once a seeker could hear or see it
+            run = near_d < env.hearing_range + 2 or bool(env.seeker_sees[:, j].any())
+            actions.append([move, turn, self._switch(env.hider_running[j], run)])
         return np.array(actions)

@@ -84,7 +84,8 @@ TOTAL_STEPS = 5_000_000 # total environment steps across all parallel games (2M 
 N_ENVS = 16             # games played in parallel (one network call covers all of them)
 ROLLOUT_STEPS = 128     # steps per game collected before each update (16 x 128 = 2048 per update)
 LEARNING_RATE = 3e-4
-GAMMA = 0.99            # discount: how much future rewards count
+GAMMA = 0.997           # discount: how much future rewards count. 0.997 (from v3.5 training on): a hider's win at
+                        # step 250 is still worth half its points at the start of the hunt (with 0.99, a tenth)
 GAE_LAMBDA = 0.95       # advantage smoothing (bias vs variance)
 CLIP_EPS = 0.2          # PPO: how far one update may move the policy
 PPO_EPOCHS = 4          # passes over each batch of experience
@@ -107,8 +108,8 @@ TRAIN_TEAMS = ["seekers", "hiders"]
 FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"   # only used for a team that is not in TRAIN_TEAMS
 # Start a team from a saved network instead of from scratch ({} = everyone from scratch). It keeps learning from there.
 START_FROM = {
-    "seekers": "runs/v3.4_both_three_sites_2v1_20261021_193635/checkpoints/latest.pt",   # v3.4 seekers
-    "hiders": "runs/v3.4_both_three_sites_2v1_20261021_193635/checkpoints/latest.pt",    # v3.4 hiders (+ new memory)
+    "seekers": "runs/v3.5_both_three_sites_2v1_20261021_220610/checkpoints/latest.pt",   # v3.5 seekers
+    "hiders": "runs/v3.5_both_three_sites_2v1_20261021_220610/checkpoints/latest.pt",    # v3.5 hiders (with memory)
 }
 # Teams whose network has a learned memory (a GRU, see model.py). Loading a network saved without memory adds an empty
 # memory that starts switched off, so the team plays exactly as before until it learns to use it.
@@ -121,6 +122,9 @@ MEMORY_TEAMS = ["hiders"]
 OPPONENT_POOL = True    # False = plain self-play
 POOL_PROB = 0.5         # chance a game uses a past version of one team (which team is picked at random)
 SNAPSHOT_EVERY = 10     # add a snapshot of both teams to the pool every this many updates (at the start, see below)
+ESCAPE_BOT_PROB = 0.25  # share of games where the hider is the cheating escape bot (bots.py) instead of a network.
+                        # Seekers learn from these games (so they must really search, not just exploit one set of
+                        # hiders' habits); hiders do not. 0 switches it off
 POOL_SIZE = 20          # keep at most this many snapshots per team. When the pool is full, every second snapshot
                         # is dropped and the gap between snapshots doubles, so the pool always spans the whole run
                         # (from the first random network to the latest), evenly spaced

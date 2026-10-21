@@ -91,7 +91,8 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
             f"loss {cfg.REWARD_LOSS:+}\n")
     f.write(f"- learning: {', '.join(cfg.TRAIN_TEAMS)}"
             + (f" (the others are frozen, loaded from {cfg.FROZEN_RUN})" if len(cfg.TRAIN_TEAMS) < 2 else " (self-play)")
-            + f"; hider noise cost {cfg.HIDER_NOISE_COST}, switch starts at keep {cfg.SWITCH_KEEP_PROB:.0%}\n")
+            + f"; hider noise cost {cfg.HIDER_NOISE_COST}, switch starts at keep {cfg.SWITCH_KEEP_PROB:.0%}; "
+            + f"escape bot plays the hiders in {cfg.ESCAPE_BOT_PROB:.0%} of games; discount {cfg.GAMMA}\n")
     for team, path in cfg.START_FROM.items():
         f.write(f"- {team} start from {path} (and keep learning)\n")
     f.write(f"- total steps: {total_steps:,}\n\n")
@@ -149,7 +150,10 @@ POOL_TEAMS = FROZEN_TEAMS if FROZEN_TEAMS else TEAMS
 
 
 def pick_frozen_team():
-    # for a new game: None (both teams current, normal self-play) or the team that plays as a past version
+    # for a new game: None (both teams current, normal self-play), the team that plays as a past version,
+    # or "escape": the hiders are the cheating escape bot (only the seekers learn from that game)
+    if "seekers" in cfg.TRAIN_TEAMS and pool_rng.random() < cfg.ESCAPE_BOT_PROB:
+        return "escape"
     if cfg.OPPONENT_POOL and pool_rng.random() < cfg.POOL_PROB:
         return str(pool_rng.choice(POOL_TEAMS))
     return None
@@ -453,6 +457,7 @@ recent_winner = deque(maxlen=cfg.WINRATE_WINDOW)     # 1 if seekers won
 recent_len = deque(maxlen=cfg.WINRATE_WINDOW)
 recent_spotted = deque(maxlen=cfg.WINRATE_WINDOW)
 recent_hider_return = deque(maxlen=cfg.WINRATE_WINDOW)
+recent_vs_escape = deque(maxlen=cfg.WINRATE_WINDOW)  # seekers' win rate in games against the escape bot
 ep_hider_return = np.zeros(E)
 ep_spotted = np.zeros(E)
 ep_hunting = np.zeros(E)
@@ -460,7 +465,7 @@ ep_hunting = np.zeros(E)
 steps_done, games_done, update = 0, 0, 0
 next_record = 0
 csv_path = os.path.join(run_dir, "metrics.csv")
-csv_fields = ["update", "steps", "games", "seeker_win_rate", "avg_game_length", "spotted_frac", "hider_return",
+csv_fields = ["update", "steps", "games", "seeker_win_rate", "seeker_win_vs_escape_bot", "avg_game_length", "spotted_frac", "hider_return",
               "seeker_entropy", "hider_entropy", "seeker_v_loss", "hider_v_loss", "seeker_kl", "hider_kl", "steps_per_sec"]
 with open(csv_path, "w", newline="") as f:
     csv.writer(f).writerow(csv_fields)
@@ -514,7 +519,8 @@ try:
             # all games step at once in the workers; finished games come back already reset
             hunting_before = game_t >= cfg.HIDING_PHASE
             alive_before_all = game_alive.copy()
-            new_obs, rewards, dones, infos = games.step(actions["seekers"], actions["hiders"])
+            new_obs, rewards, dones, infos = games.step(actions["seekers"], actions["hiders"],
+                                                        np.array([ft == "escape" for ft in frozen_team]))
             round_end[t] = np.array(dones, dtype=np.float32)
             # wipe the memory of every agent whose round just ended (the next step is a new round)
             if round_end[t].any():
@@ -532,7 +538,7 @@ try:
                 # frozen past versions (and teams that do not learn at all) don't learn, so their steps never count
                 buf["seekers"]["valid"][t, e] = float(hunting and frozen_team[e] != "seekers" and "seekers" in cfg.TRAIN_TEAMS)
                 buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32) * float(
-                    frozen_team[e] != "hiders" and "hiders" in cfg.TRAIN_TEAMS)
+                    frozen_team[e] not in ("hiders", "escape") and "hiders" in cfg.TRAIN_TEAMS)
 
                 newly_caught = alive_before & ~info["hider_alive"]
                 buf["seekers"]["reward"][t, e] = r["seekers"]
@@ -548,6 +554,8 @@ try:
                 if done:
                     games_done += 1
                     # self-play stats only count games where both teams are their current selves
+                    if frozen_team[e] == "escape":
+                        recent_vs_escape.append(1.0 if info["winner"] == "seekers" else 0.0)
                     if frozen_team[e] is None:
                         recent_winner.append(1.0 if info["winner"] == "seekers" else 0.0)
                         recent_len.append(info["t"])
@@ -590,6 +598,7 @@ try:
                 "steps": steps_done,
                 "games": games_done,
                 "seeker_win_rate": np.mean(recent_winner),
+                "seeker_win_vs_escape_bot": np.mean(recent_vs_escape) if recent_vs_escape else np.nan,
                 "avg_game_length": np.mean(recent_len),
                 "spotted_frac": np.mean(recent_spotted),
                 "hider_return": np.mean(recent_hider_return),
@@ -604,7 +613,8 @@ try:
             with open(csv_path, "a", newline="") as f:
                 csv.writer(f).writerow([row[k] for k in csv_fields])
             print(f"update {update:4d} | steps {steps_done:>9,} | games {games_done:>6,} | "
-                  f"seeker win {row['seeker_win_rate']:5.1%} | length {row['avg_game_length']:5.1f} | "
+                  f"seeker win {row['seeker_win_rate']:5.1%} (v escape bot {row['seeker_win_vs_escape_bot']:5.1%}) | "
+                  f"length {row['avg_game_length']:5.1f} | "
                   f"spotted {row['spotted_frac']:5.1%} | entropy S {row['seeker_entropy']:.2f} H {row['hider_entropy']:.2f} | "
                   f"{sps:,.0f} steps/s")
 

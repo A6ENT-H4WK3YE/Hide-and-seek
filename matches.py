@@ -25,7 +25,7 @@ def random_actions(rng, n):
 
 
 def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=None):
-    # policies: {"seekers": ..., "hiders": ...}, each one of "trained", "bot", "random"
+    # policies: {"seekers": ..., "hiders": ...}, each one of "trained", "bot", "random" (hiders also "escape")
     rng = np.random.default_rng(seed)
     seeker_wins, lengths, spotted, hunting = 0, [], 0, 0
     for k in range(games):
@@ -43,6 +43,8 @@ def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=N
                     acts[team], h[team] = trained_actions(nets[team], obs[team], device, h[team])
                 elif policies[team] == "bot":
                     acts[team] = bots.seeker_actions() if team == "seekers" else bots.hider_actions()
+                elif policies[team] == "escape":
+                    acts[team] = bots.escape_actions()       # cheating escape hider (hiders only)
                 else:
                     acts[team] = random_actions(rng, len(obs[team]))
             obs, _, done, info = env.step(acts["seekers"], acts["hiders"])

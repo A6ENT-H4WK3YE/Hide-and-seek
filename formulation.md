@@ -323,6 +323,17 @@ Several changes in one run, at Moeez's request; the behaviour measurements separ
   dotted line joins each listener to the footsteps it hears, "HEARD" in the title), and GIFs play at half speed (3 fps).
 
 ### Not game changes (training only, recorded in each run card instead)
+- **Escape bot and a league of opponents (2026-10-22, from the v3.5 networks):** a new scripted hider, the escape bot,
+  cheats on purpose (it always knows where both seekers are): it heads for the spot furthest from the seekers among
+  those it can reach first, faces the nearest seeker, walks while out of earshot and runs once a seeker could hear or
+  see it. As a test it showed the trained seekers were not good in general: chaser bots catch it 71%, v3.5 seekers 27%,
+  v3.4 seekers 6%. Since then it also plays the hiders in a quarter of training games (`ESCAPE_BOT_PROB`); seekers
+  learn from those games, hiders do not. So seekers train against current hiders, past hiders and the escape bot.
+- **Discount 0.99 -> 0.997** (from the same run): with 250-step rounds and 0.99, a hider's win at the end was worth only
+  2.2 of its 20 points at the start of the hunt (with 0.997, 10.3), so hiders could not feel the value of plans that
+  pay off late (hiding, slipping away from footsteps). Seekers' rewards (catches) come sooner, which is why they always
+  learned faster. Moeez's idea of rewarding hiders for spotting seekers unseen was not taken: it would be reward tweaking.
+
 - Opponent pool: some training games are played against frozen past versions of the other team.
   This changes how agents learn, not what the game is, so it does not get a game version.
 - Benchmark bots (`bots.py`): a scripted chaser and a scripted fleeing hider, used only to measure progress.

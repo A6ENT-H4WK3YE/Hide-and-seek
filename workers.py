@@ -4,7 +4,8 @@
 #
 #   games = ParallelGames(map_file, seeds, n_seekers, n_hiders, n_workers)   one game per seed
 #   obs = games.reset()                                                       one observation dict per game
-#   obs, rewards, dones, infos = games.step(seeker_actions, hider_actions)    one entry per game
+#   obs, rewards, dones, infos = games.step(seeker_actions, hider_actions, escape_bot)    one entry per game
+#      (escape_bot: optional, one True / False per game: that game's hiders are played by the escape bot instead)
 #   games.close()
 #
 # A finished game is reset straight away inside its worker, so the observation returned for it is already the
@@ -53,10 +54,12 @@ class ParallelGames:
             obs += self._recv(p)
         return obs
 
-    def step(self, seeker_actions, hider_actions):
+    def step(self, seeker_actions, hider_actions, escape_bot=None):
         # seeker_actions / hider_actions: one row of actions per game. All workers step at the same time.
+        if escape_bot is None:
+            escape_bot = np.zeros(len(seeker_actions), dtype=bool)
         for p, part in zip(self.procs, self.parts):
-            self._send(p, ("step", seeker_actions[part], hider_actions[part]))
+            self._send(p, ("step", seeker_actions[part], hider_actions[part], escape_bot[part]))
         obs, rewards, dones, infos = [], [], [], []
         for p in self.procs:
             for o, r, d, info in self._recv(p):
@@ -81,18 +84,22 @@ def serve():
     inp, out = sys.stdin.buffer, sys.stdout.buffer
     sys.stdout = sys.stderr          # anything printed must not end up in the message pipe
     from env import HideSeekEnv
-    envs, seeds, n_seekers, n_hiders = [], [], 0, 0
+    from bots import Bots
+    envs, bots, seeds, n_seekers, n_hiders = [], [], [], 0, 0
     while True:
         msg = pickle.load(inp)
         if msg[0] == "init":
             map_file, seeds, n_seekers, n_hiders = msg[1:]
             envs = [HideSeekEnv(map_file) for _ in seeds]
+            bots = [Bots(env) for env in envs]          # for games where the escape bot plays the hiders
             reply = "ready"
         elif msg[0] == "reset":
             reply = [env.reset(seed=s, n_seekers=n_seekers, n_hiders=n_hiders) for env, s in zip(envs, seeds)]
         elif msg[0] == "step":
             reply = []
-            for env, sa, ha in zip(envs, msg[1], msg[2]):
+            for env, bot, sa, ha, use_bot in zip(envs, bots, msg[1], msg[2], msg[3]):
+                if use_bot:
+                    ha = bot.escape_actions()
                 o, r, done, info = env.step(sa, ha)
                 if done:
                     o = env.reset(n_seekers=n_seekers, n_hiders=n_hiders)

@@ -42,6 +42,8 @@ matchups = [
     ("trained", "random", "SEEKERS: higher = better (compare with the chaser bot line)"),
     ("bot", "trained", "HIDERS: lower = better (compare with the two bot lines above)"),
     ("trained", "bot", "SEEKERS vs the fleeing bot: higher = better (compare with bot vs bot)"),
+    ("bot", "escape", "reference: the chaser bot against the cheating escape bot (knows where seekers are)"),
+    ("trained", "escape", "SEEKERS stress test: vs the cheating escape bot (compare with the line above)"),
     ("trained", "trained", "self-play matchup"),
 ]
 print(f"{n_games} games per matchup, {cfg.N_SEEKERS}v{cfg.N_HIDERS} on {cfg.MAP_FILE}\n")

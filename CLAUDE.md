@@ -4,20 +4,25 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-21, late night)
+## Where we left off (2026-10-22)
 
-- Branch `main`, game version **v3.5**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
-- **v3.5 run done and analysed** (results below), both teams learned: seekers from the v3.4 seekers, hiders from the v3.4 hiders plus a new
-  learned memory (GRU, `MEMORY_TEAMS = ["hiders"]`). Also in this run: no hider noise cost (zero-sum again), and the
-  win / loss reward doubled to 20 (catch about +40 v watching a whole round about +20). Run name `v3.5_both_*`.
-- What to check after it: do hiders vary their spot now (heatmap, share of rounds at A / B / C), do they run away when
-  they hear a seeker (run share and distance change when hearing), seekers' coverage and dead zones, who wins,
-  evaluate.py. Analysis scripts in the scratchpad need updating: networks now come from `model.load_net`, and `act`
-  takes and returns the memory (`a, logp, value, h = net.act(obs, h)`).
-- Not taken: a random "plan" number for hiders each round (Moeez: let them learn it through memory); a flee reward
-  (would be reward tweaking; removing the noise cost instead).
-- Still queued: potential-based exploration shaping for seekers if dead zones remain; team spotting; aim reward;
-  a sharper minimap (12 x 12 blurs the 1-wide corridors: hiders bump into walls on 10% of moves, seekers 4%).
+- Branch `main`, game version **v3.5** (hider memory, no noise cost, win / loss 20), map `three_sites.txt`, 2v1.
+- **Seekers were not as good as they looked.** A new cheating stress-test hider, the escape bot (`bots.escape_actions`,
+  knows where both seekers are), is caught by the chaser bots 71% of the time but by the v3.5 seekers only 27% (v3.4: 6%).
+  They had learned the trained hiders' habits, not how to search.
+- **Run started (training changes only, Moeez said: optimise the process as you think best):** both teams continue from
+  the v3.5 networks; the escape bot plays the hiders in 25% of games (seekers learn from those, hiders do not:
+  `ESCAPE_BOT_PROB`, run inside the workers); discount 0.99 -> 0.997 so a hider's survival counts at the start of the
+  hunt (10.3 of 20 points instead of 2.2). metrics.csv and the console log the seekers' win rate against the escape bot.
+  Smoke run: seekers' self-play wins fell from 100% to 67% within 60k steps (hiders react to the longer horizon).
+  Run name `v3.5_league_*`, 5M steps.
+- Plan agreed with Moeez: once the seekers beat the escape bot about as well as the chaser bots, freeze them and
+  focus on the hiders.
+- Moeez's questions answered with data: hiders are never heard during the hiding phase (0 of 100 rounds), but in 53% of
+  rounds seekers hear them later (median step 60). Why hiders don't learn plans like "seekers come from mid and top,
+  slip round to the bottom": the 0.99 discount made the end-of-round win nearly worthless early in the round.
+  Not taken: a reward for hiders spotting seekers unnoticed (reward tweaking, and hiders might seek seekers out).
+- Still queued: potential-based exploration shaping for seekers; team spotting; aim reward; sharper minimap.
 - **Always start runs with `caffeinate -i`, smoke runs and evaluations too.**
 
 ## Who you are working with
@@ -98,7 +103,8 @@ model.py        TeamNet: one network per team, shared by teammates; three action
 train.py        PPO self-play, opponent pool, run card, metrics, GIFs, checkpoints, bot benchmarks
 workers.py      runs the training games in parallel processes (one per CPU core)
 evaluate.py     plays a checkpoint against random players and the bots
-bots.py         scripted chaser seeker and fleeing hider (fixed benchmarks; plan on the grid, steer continuously)
+bots.py         scripted chaser seeker, fleeing hider and the cheating escape hider (benchmarks; plan on the grid,
+                steer continuously); the escape bot also plays in training games (ESCAPE_BOT_PROB)
 matches.py      plays any mix of trained / bot / random players
 test_env.py     56 rule checks (must say "all checks passed")
 random_demo.py  random agents: one GIF plus baseline win rates and speed
@@ -155,6 +161,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | (big map) | `three_sites.txt`, 250-step rounds, 30-step hiding phase, 5M steps | Moeez wanted to see emergent behaviour on a real map |
 | v3 | walk (half speed, silent) or run (full speed, heard within 6 cells of walking distance) | Moeez: hiders could not tell a seeker was behind them |
 | v3.1 | walk / run becomes a mode you switch, starting in walk; opponent pool spans the whole run (together, at Moeez's request) | hiders never learned to stay quiet |
+| (league) | escape bot in 25% of training games; discount 0.99 -> 0.997 (training only) | v3.5 seekers caught the cheating escape bot only 27% (chaser bots 71%); hiders could not feel a win 250 steps away |
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
@@ -186,6 +193,7 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3.3 both | big, both learning, seekers from v3.2, hiders from v3.3, stopped at 213k | not evaluated | | | 2% -> 10% |
 | v3.4 both | big, 5M, seekers from v3.2, hiders from v3.3, team memory 60 steps | 84% (chaser 100%) | 53% (chaser 91%) | **67%** (random hider 100%, fleeing bot 91%) | 97% |
 | v3.5 both | big, 5M, from v3.4, hider memory, no noise cost, win / loss 20 | 96% (chaser 100%) | **89%** (chaser 91%) | 94% (random hider 100%, fleeing bot 91%) | 84% |
+| v3.5 league | big, 5M, from v3.5, escape bot in 25% of games, discount 0.997 | training | | | |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 
@@ -267,6 +275,11 @@ What the agents did (measured, not just watched):
   and won 99%. The best hider play mixes sites at random; PPO self-play tends to collapse onto one plan.
 - **Teamwork needs information.** Shared rewards alone gave no cooperation beyond loosely splitting up; the second
   seeker cannot help with a chase it does not know about (hence team spotting).
+- **Winning against your training partner is not the same as being good.** v3.5 seekers beat their own hiders 84 to
+  99%, but caught the escape bot only 27% (chaser bots 71%): they had learned the hiders' habits. A fixed, strong
+  outside opponent is the honest test.
+- **The discount must fit the round length.** With 0.99 and 250-step rounds, a hider's win was worth a tenth of its
+  points at the start of the hunt; the side whose reward comes late (hiders) always learned slowest.
 - **Measure behaviour, not just win rates.** Move and turn counts, "walks forward when it sees the hider",
   forced-action tests and heatmaps found every real problem; the curves alone did not.
 - **Per-step rewards scale with round length.** The anti-farming margin that was safe in 100-step rounds almost

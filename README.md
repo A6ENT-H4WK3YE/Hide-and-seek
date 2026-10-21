@@ -28,7 +28,7 @@ Next: team spotting (teammates share what they see and hear), an aim reward (kee
 
 ## Results so far
 
-Seekers' win rate over 300 games per matchup, 2 seekers v 1 hider. "Chaser" and "fleeing bot" are the scripted benchmark players in `bots.py`.
+Seekers' win rate over 300 games per matchup, 2 seekers v 1 hider. "Chaser" and "fleeing bot" are the scripted benchmark players in `bots.py`. The "escape bot" is a stress test that cheats (it always knows where the seekers are): the chaser bots catch it 71% of the time, the v3.5 seekers only 27%.
 
 | Version, map | Trained seekers v random hider | Trained seekers v fleeing bot | Chaser bot v trained hiders (lower = better hiders) | Self-play |
 |---|---|---|---|---|
@@ -57,6 +57,8 @@ Insights so far:
 - **Whichever team can never win stops learning** (seen with seekers in 1v1 on the grid and with hiders on the tiny map and in v3). Balance matters as much as the algorithm.
 - **Agents do exactly what the reward pays for**, including tricks like spinning; small reward changes reshape behaviour.
 - **Teamwork needs information.** Shared rewards alone gave little cooperation: a seeker cannot help with a chase it does not know about.
+- **Beating your training partner is not the same as being good.** Seekers that won 84 to 99% against their own hiders caught the escape bot only 27% of the time: they had learned their opponents' habits, not how to search. Seekers now also train against the escape bot.
+- **The discount has to fit the round.** With rounds of 250 steps, a hider's win at the end was worth a tenth of its points at the start, so hiders could not learn plans that pay off late; the discount is now 0.997.
 - **Measure behaviour, not just win rates.** Move and turn counts, forced-action tests and heatmaps found every real problem; the training curves alone did not.
 - **For a small network, the game is the bottleneck.** The Mac GPU was slower than the CPU; running the games in parallel worker processes made training 2.6x faster.
 
@@ -151,7 +153,7 @@ python evaluate.py runs/<run name>/checkpoints/latest.pt
 Each run gets its own folder in `runs/` with a `run_card.md` (every setting, game version, git commit),
 `metrics.csv`, `curves.png`, recorded GIFs and checkpoints. Ctrl+C stops training early and still saves.
 
-**Benchmark bots:** at every recording, the trained teams also play the scripted bots in `bots.py`, logged in
+**Benchmark bots:** `evaluate.py` also tests trained seekers against the cheating escape bot, and during training the escape bot plays the hiders in a quarter of the games (`ESCAPE_BOT_PROB`). At every recording, the trained teams also play the scripted bots in `bots.py`, logged in
 `bots.csv` and the "vs fixed benchmark bots" panel of `curves.png`. The reference numbers for the current map and
 version are measured at the start of each run and written to the run card.
 
