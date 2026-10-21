@@ -8,8 +8,12 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 
 - Branch `main` (pushed, now holds all the continuous work), tag `v3.1` (pushed). Game version **v3.1**, map `three_sites.txt`, 2 seekers v 1 hider,
   5M steps per run, 16 game workers.
+- **New since then: ray casting is compiled with numba** (game steps 4x faster, results bit-for-bit identical).
+  On the Mac, first run `pip install numba` in `.venv`, then `python test_env.py` and a smoke run, and note the new
+  steps/s here (without numba the game still runs, just at the old speed).
 - The v3.1 training run was **stopped by Moeez at 539k of 5M steps** (`runs/v3.1_three_sites_2v1_20261021_032009`).
-  `train.py` cannot resume, so **next session: start it again** with `caffeinate -i python train.py` (about 45 minutes).
+  `train.py` cannot resume, so **next session: start it again** with `caffeinate -i python train.py` (about 45 minutes
+  before numba).
   Ignore the partial folder `runs/v3.1_three_sites_2v1_20261021_030037` (stopped at 490k, before the workers).
 - After the run: the same analysis as for v3, then compare. Scripts used for v3 lived in the scratchpad, so rebuild them
   (or add an `analyse.py` to the repo, which Moeez was offered and has not decided on):
@@ -61,7 +65,15 @@ optimisation (MDPs, Q-learning, stochastic games, Nash equilibria, multi-agent R
   quit VS Code or let the battery run out. To stop a run and keep a checkpoint, send Ctrl+C (SIGINT), not a kill.
 - GitHub repo: `A6ENT-H4WK3YE/Hide-and-seek`. There is also a GitHub Codespace copy (2 cores, slow);
   the Mac is the main machine. Commit and push before switching machines.
-- He also has a desktop with an AMD RX 9070 GRE (PyTorch via ROCm on Windows is possible, not set up).
+- **Ray casting is compiled with numba** (`geometry.py`; falls back to the numpy version if numba is missing).
+  It was 88% of each game step: about 25 cell steps per call, each ~20 tiny numpy calls on only ~100 rays, so numpy's
+  per-call overhead dominated. Compiled: 46x faster rays, game step 2.07 -> 0.51 ms (measured on the desktop).
+- He also has a **Windows desktop** (AMD Ryzen 5 7500X3D, 6 cores, RX 9070 GRE), set up 2026-10-21: Python 3.13 in
+  `.venv`, CPU torch, activate with `.\.venv\Scripts\Activate.ps1`. Smart App Control is on and checks each new DLL
+  the first time it loads (the first numpy / torch import can fail or take minutes; later ones are fine).
+  Measured there: training about 1,650 steps/s with numba (860 without), bot games 0.12 to 0.36 s each.
+  GPU (ROCm) and overclocking were considered and rejected: the game, not the network, is the bottleneck.
+  Not yet tried: `N_WORKERS` = core count (16 workers share 6 cores there).
 
 ## The end goal
 
@@ -145,6 +157,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | v3 | walk (half speed, silent) or run (full speed, heard within 6 cells of walking distance) | Moeez: hiders could not tell a seeker was behind them |
 | v3.1 | walk / run becomes a mode you switch, starting in walk; opponent pool spans the whole run (together, at Moeez's request) | hiders never learned to stay quiet |
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
+| (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
 
 Decisions behind v2 (agreed 2026-10-20): fixed set of 9 turns (continuous turning is a later experiment); catch 0.8 and
 30 degrees and in sight; radius 0.3, speed 1 for every direction; agents pass through each other; turn then move;

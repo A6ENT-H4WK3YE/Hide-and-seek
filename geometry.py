@@ -11,6 +11,11 @@
 
 import numpy as np
 
+try:
+    import numba        # compiles the ray walk below to machine code (4x faster game steps); optional
+except ImportError:
+    numba = None
+
 
 def is_wall(walls, r, c):
     H, W = walls.shape
@@ -82,6 +87,11 @@ def cast_rays(walls, ox, oy, angles, eps=1e-9):
 
     padded = np.ones((H + 2, W + 2), dtype=bool)   # border of wall so rays never leave the map
     padded[1:-1, 1:-1] = walls
+    if numba is not None:
+        return _walk_rays(padded, cx.astype(np.int64), cy.astype(np.int64), sx.astype(np.int64), sy.astype(np.int64),
+                          tx, ty, tdx, tdy, H + W + 2)
+    # without numba: the same walk for all rays at once in numpy (identical results, about 45x slower,
+    # because each of the ~25 steps is ~20 tiny numpy calls on only ~100 rays)
     dist = np.full(n, np.inf)
     active = np.ones(n, dtype=bool)
     for _ in range(H + W + 2):
@@ -108,6 +118,41 @@ def cast_rays(walls, ox, oy, angles, eps=1e-9):
         dist[hit] = t[hit]
         active &= ~hit
     return dist
+
+
+def _walk_rays_loop(padded, cx, cy, sx, sy, tx, ty, tdx, tdy, max_steps):
+    # the walk in cast_rays, one ray at a time, as plain loops for numba to compile.
+    # Same arithmetic in the same order as the numpy version, so the distances are exactly equal.
+    Hp, Wp = padded.shape
+    dist = np.full(cx.shape[0], np.inf)
+    for i in range(cx.shape[0]):
+        x, y, txi, tyi = cx[i], cy[i], tx[i], ty[i]
+        for _ in range(max_steps):
+            t = min(txi, tyi)
+            if abs(txi - tyi) < 1e-9:
+                # exactly through a corner: blocked if either side cell is a wall, otherwise go diagonally
+                if (padded[min(max(y + 1, 0), Hp - 1), min(max(x + sx[i] + 1, 0), Wp - 1)]
+                        or padded[min(max(y + sy[i] + 1, 0), Hp - 1), min(max(x + 1, 0), Wp - 1)]):
+                    dist[i] = t
+                    break
+                x += sx[i]
+                y += sy[i]
+                txi += tdx[i]
+                tyi += tdy[i]
+            elif txi < tyi:
+                x += sx[i]
+                txi += tdx[i]
+            elif tyi < txi:
+                y += sy[i]
+                tyi += tdy[i]
+            if padded[min(max(y + 1, 0), Hp - 1), min(max(x + 1, 0), Wp - 1)]:
+                dist[i] = t
+                break
+    return dist
+
+
+# compiled once per machine, then cached on disk (__pycache__), so later runs start straight away
+_walk_rays = numba.njit(cache=True)(_walk_rays_loop) if numba is not None else None
 
 
 def line_clear(walls, x0, y0, x1, y1):

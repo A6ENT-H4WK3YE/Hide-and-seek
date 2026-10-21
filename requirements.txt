@@ -2,4 +2,5 @@ numpy
 matplotlib
 imageio
 pillow
+numba       # optional: compiles the ray casting, 4x faster game steps (the game runs without it, just slower)
 # torch is installed separately, see README (build depends on your GPU)
