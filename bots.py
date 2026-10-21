@@ -15,8 +15,9 @@
 # Usage:
 #   bots = Bots(env)
 #   bots.reset()                 after every env.reset()
-#   bots.seeker_actions()        one (move, turn, speed) triple per seeker
-#   bots.hider_actions()         one (move, turn, speed) triple per hider
+#   bots.seeker_actions()        one (move, turn, switch) triple per seeker
+#   bots.hider_actions()         one (move, turn, switch) triple per hider
+# (switch = 1 flips the walk / run mode; the bots switch whenever their mode is not the one they want)
 
 import numpy as np
 import config as cfg
@@ -27,7 +28,7 @@ FLEE_MEMORY = 10      # a fleeing hider keeps running from a seeker it saw up to
 WANDER_STEPS = 30     # a wandering seeker picks a new random spot after this many steps, even if not there yet
 SCAN_TURN = cfg.TURN_ANGLES.index(30)    # a waiting hider turns this way each step to look around
 STEPS4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-WALK, RUN = 0, 1
+WALK, RUN = False, True
 
 
 class Bots:
@@ -45,6 +46,10 @@ class Bots:
         self.hider_threat = [None] * self.env.n_hiders       # (position, steps ago) of the last seeker seen or heard
 
     # ---------- steering ----------
+    def _switch(self, running, want):
+        # 1 if the walk / run mode has to flip to get the mode we want, otherwise 0 (keep)
+        return int(bool(running) != want)
+
     def _route(self, pos, target):
         # direction to walk from pos towards target: straight there if the line is clear,
         # otherwise towards the centre of the next cell on the shortest grid path
@@ -111,7 +116,7 @@ class Bots:
             close_enough = visible and np.hypot(*(target - pos)) <= 0.9 * cfg.CATCH_DISTANCE
             facing = abs(wrap_angle(want - new_heading)) < np.radians(50)
             move = 1 if (facing and not close_enough) else 0
-            actions.append([move, turn, RUN])
+            actions.append([move, turn, self._switch(env.seeker_running[i], RUN)])
         return np.array(actions)
 
     # ---------- hiders ----------
@@ -121,7 +126,7 @@ class Bots:
         for j in range(env.n_hiders):
             pos, heading = env.hiders[j], env.hider_heading[j]
             if not env.hider_alive[j]:
-                actions.append([0, NO_TURN, WALK])
+                actions.append([0, NO_TURN, 0])
                 continue
             visible = [env.seekers[i] for i in np.where(env.hider_sees[j] | env.hider_hears[j])[0]]
             if visible:
@@ -131,7 +136,7 @@ class Bots:
                 self.hider_threat[j] = (spot, age + 1) if age + 1 <= FLEE_MEMORY else None
 
             if self.hider_threat[j] is None:
-                actions.append([0, SCAN_TURN, WALK])      # nothing to run from: stay (silent) and look around
+                actions.append([0, SCAN_TURN, self._switch(env.hider_running[j], WALK)])   # nothing to run from: stay (silent) and look around
                 continue
             threat = self.hider_threat[j][0]
             # head for the neighbouring cell that is furthest (walking) from the threat
@@ -142,5 +147,5 @@ class Bots:
             # keep looking at the threat while backing away
             turn = self._turn_towards(heading, np.arctan2(threat[1] - pos[1], threat[0] - pos[0]))
             move = self._move_towards(heading + TURNS[turn], away) if np.hypot(*(goal - pos)) > 0.1 else 0
-            actions.append([move, turn, RUN])
+            actions.append([move, turn, self._switch(env.hider_running[j], RUN)])
         return np.array(actions)

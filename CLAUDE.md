@@ -47,7 +47,7 @@ agents playing in a 3D world. The goal can grow later.
 Roadmap:
 1. v1: grid world (done, see results)
 2. v2: continuous space with cone vision (built on branch `v2-continuous`, v2.1 results below)
-3. **v3: walk vs run with sound (built, first big-map run done, see results)**
+3. **v3: walk vs run with sound (v3.1 with a walk / run toggle is current, run under way)**
 4. Bigger map (`maps/three_sites.txt`) and bigger teams
 5. Continuous turning actions, learned memory (GRU), communication between teammates
 6. Continuous time (positions follow differential equations)
@@ -257,6 +257,20 @@ is the stepping stone to the continuous-time version of the end goal.
   personal "last seen enemy" memory. Same for both teams. Bots react to sound too.
 - Still queued, one change each: slower backpedal and strafe; team spotting; the anti-farming margin on 250-step rounds
   (watching a hider point blank for a whole round now pays about the same as catching, undiscounted).
+
+## v3.1 decisions (made 2026-10-21)
+
+- Moeez asked for two fixes for the hiders **together** (so their effects cannot be separated):
+  1. walk / run is a mode: the action is "keep" or "switch", every round starts walking, frozen seekers cannot switch,
+     and the mode is the 7th number in "vec". Bots switch to the mode they want.
+  2. opponent pool spans the whole run: when full (20), keep every second snapshot and double the gap between snapshots.
+- Moeez's two seeker complaints, measured on the v3 networks (queued as the next changes, in this order):
+  - no teamwork: while one seeker sees the hider, the other walks only +0.07 cells closer per step (less than +0.15 when
+    nobody sees it), because nothing passes information between them -> **team spotting** (v3.2)
+  - sloppy lock-on: seekers turn towards a seen hider 87% of the time but pick the turn that centres it only 39%; the hider
+    goes from 19 to 30 degrees off-centre per step and is lost 26% of the time. Nothing rewards centring (anywhere in the
+    cone pays the same) -> **aim reward** (seen reward grows with how centred the hider is), together with the
+    anti-farming fix for 250-step rounds, since both touch the same reward (v3.3)
 
 ## v2 as built (branch `v2-continuous`)
 

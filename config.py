@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3"
+GAME_VERSION = "v3.1"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -66,7 +66,8 @@ REWARD_LOSS = -10.0     # hiders survive to the time limit
 # every step each agent picks two things at once:
 #   move: 0 stay, 1 forward, 2 back, 3 strafe left, 4 strafe right (relative to where it looks)
 #   turn: an index into TURN_ANGLES
-#   speed: 0 walk (half speed, silent), 1 run (full speed, can be heard)
+#   switch: 0 keep my walk / run mode, 1 switch it (walk = half speed, silent; run = full speed, can be heard).
+#           The mode stays until switched again, and every round starts walking.
 N_MOVES = 5
 N_TURNS = len(TURN_ANGLES)
 N_SPEEDS = 2
@@ -94,8 +95,10 @@ DEVICE = "cpu"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda"
 # many opponents, not just the current one (the idea behind fictitious play).
 OPPONENT_POOL = True    # False = plain self-play
 POOL_PROB = 0.5         # chance a game uses a past version of one team (which team is picked at random)
-SNAPSHOT_EVERY = 10     # add a snapshot of both teams to the pool every this many updates
-POOL_SIZE = 20          # keep at most this many snapshots per team (oldest dropped first)
+SNAPSHOT_EVERY = 10     # add a snapshot of both teams to the pool every this many updates (at the start, see below)
+POOL_SIZE = 20          # keep at most this many snapshots per team. When the pool is full, every second snapshot
+                        # is dropped and the gap between snapshots doubles, so the pool always spans the whole run
+                        # (from the first random network to the latest), evenly spaced
 
 # ---------- benchmark bots (see bots.py) ----------
 BOT_EVAL_GAMES = 100    # games per bot matchup at every recording (0 switches it off)

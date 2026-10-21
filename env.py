@@ -1,13 +1,16 @@
 # Hide and seek in continuous space. Agents are circles with a real position and a heading,
 # walls are the '#' squares of a map file, and each agent sees a 90 degree cone blocked by walls.
 # Running is fast but makes noise that enemies nearby can hear; walking is slow and silent.
+# Walk / run is a mode that stays on until the agent switches it (like toggling walk in an FPS);
+# every round starts walking.
 #
 # Usage:
 #   env = HideSeekEnv()
 #   obs = env.reset()
 #   obs, rewards, done, info = env.step(seeker_actions, hider_actions)
 #
-# Actions: one (move, turn, speed) triple per agent, e.g. seeker_actions = [[1, 4, 1], [0, 6, 0]]  (see config.py)
+# Actions: one (move, turn, switch) triple per agent, e.g. seeker_actions = [[1, 4, 1], [0, 6, 0]]  (see config.py)
+#          switch: 0 keep my walk / run mode, 1 switch it
 # obs is a dict {"seekers": [...], "hiders": [...]}, one entry per agent. Each entry is a dict:
 #   "rays":    (N_RAYS, 4)            per ray, left to right across the cone: distance to what it hit,
 #                                     and whether that is a wall, a teammate or an enemy
@@ -15,7 +18,7 @@
 #                                     seen flag, direction relative to where I look (cos, sin), distance
 #   "heard":   (MAX_TEAM_SIZE, 4)     enemies I can hear running right now, nearest first, same layout
 #                                     (distance here is the walking distance the sound travelled)
-#   "vec":     (6,)                   my position, my heading (cos, sin), time, hiding phase
+#   "vec":     (7,)                   my position, my heading (cos, sin), time, hiding phase, am I running
 #   "minimap": (N_MINIMAP_CHANNELS, MINIMAP_SIZE, MINIMAP_SIZE)   the whole map, shrunk
 # rewards is a dict {"seekers": array, "hiders": array}, one number per agent.
 #
@@ -41,7 +44,7 @@ NO_TURN = cfg.TURN_ANGLES.index(0)
 HIT_WALL, HIT_TEAMMATE, HIT_ENEMY = 0, 1, 2
 RAY_FEATURES = 4       # distance, is wall, is teammate, is enemy
 ENEMY_FEATURES = 4     # seen, cos, sin, distance
-VEC_DIM = 6            # x, y, cos(heading), sin(heading), time, hiding phase
+VEC_DIM = 7            # x, y, cos(heading), sin(heading), time, hiding phase, running
 
 # ray directions relative to the heading, spread evenly across the cone (left edge to right edge)
 RAY_OFFSETS = np.radians(np.linspace(-cfg.VISION_CONE / 2, cfg.VISION_CONE / 2, cfg.N_RAYS))
@@ -145,6 +148,8 @@ class HideSeekEnv:
         self.hider_alive = np.ones(n_hiders, dtype=bool)
         self.seeker_noisy = np.zeros(n_seekers, dtype=bool)   # made running noise this step
         self.hider_noisy = np.zeros(n_hiders, dtype=bool)
+        self.seeker_running = np.zeros(n_seekers, dtype=bool) # walk / run mode: everyone starts walking
+        self.hider_running = np.zeros(n_hiders, dtype=bool)
         self.t = 0
         self.done = False
         self.winner = None
@@ -179,15 +184,15 @@ class HideSeekEnv:
         self.hider_noisy[:] = False
         for j in range(self.n_hiders):
             if self.hider_alive[j]:
-                self.hiders[j], self.hider_heading[j], self.hider_noisy[j] = self._act(
-                    self.hiders[j], self.hider_heading[j], hider_actions[j])
+                self.hiders[j], self.hider_heading[j], self.hider_running[j], self.hider_noisy[j] = self._act(
+                    self.hiders[j], self.hider_heading[j], self.hider_running[j], hider_actions[j])
 
-        # seekers act, unless they are still frozen in the hiding phase (no moving, no turning, no noise)
+        # seekers act, unless they are still frozen in the hiding phase (no moving, turning, switching or noise)
         self.seeker_noisy[:] = False
         if not hiding_phase:
             for i in range(self.n_seekers):
-                self.seekers[i], self.seeker_heading[i], self.seeker_noisy[i] = self._act(
-                    self.seekers[i], self.seeker_heading[i], seeker_actions[i])
+                self.seekers[i], self.seeker_heading[i], self.seeker_running[i], self.seeker_noisy[i] = self._act(
+                    self.seekers[i], self.seeker_heading[i], self.seeker_running[i], seeker_actions[i])
 
         self.t += 1
         self._update_sight()
@@ -245,10 +250,11 @@ class HideSeekEnv:
         }
         return self._get_obs(), rewards, self.done, info
 
-    def _act(self, pos, heading, action):
-        # turn first, then move relative to the new heading, sliding along walls.
+    def _act(self, pos, heading, running, action):
+        # switch walk / run if asked, turn, then move relative to the new heading, sliding along walls.
         # Running is full speed and makes noise (only if actually moving); walking is half speed and silent.
-        move, turn, run = int(action[0]), int(action[1]), int(action[2])
+        move, turn, switch = int(action[0]), int(action[1]), int(action[2])
+        run = (not running) if switch else bool(running)
         heading = wrap_angle(heading + TURNS[turn])
         fwd, right = MOVES[move]
         speed = cfg.MOVE_SPEED * (1.0 if run else cfg.WALK_SPEED_FACTOR)
@@ -256,8 +262,8 @@ class HideSeekEnv:
         dx = (fwd * np.cos(heading) - right * np.sin(heading)) * speed
         dy = (fwd * np.sin(heading) + right * np.cos(heading)) * speed
         x, y = move_circle(self.walls, pos[0], pos[1], dx, dy, cfg.AGENT_RADIUS, cfg.MOVE_SUBSTEPS)
-        noisy = bool(run) and move != 0
-        return np.array([x, y]), heading, noisy
+        noisy = run and move != 0
+        return np.array([x, y]), heading, run, noisy
 
     def _closeness(self):
         # 1 when a seeker touches a hider it sees, falling to 0 at CLOSENESS_RANGE; the best pair counts
@@ -378,7 +384,7 @@ class HideSeekEnv:
                 out[k] = [1.0, np.cos(angle[e]), np.sin(angle[e]), distances[e] / cfg.RAY_NORM]
         return out
 
-    def _agent_obs(self, a, me, heading, teammates, enemies_seen, enemies_heard, memory, searched_small):
+    def _agent_obs(self, a, me, heading, running, teammates, enemies_seen, enemies_heard, memory, searched_small):
         # rays: distance, plus one of wall / teammate / enemy
         rays = np.zeros((cfg.N_RAYS, RAY_FEATURES), dtype=np.float32)
         rays[:, 0] = self.ray_dist[a] / cfg.RAY_NORM
@@ -388,7 +394,7 @@ class HideSeekEnv:
         enemies = self._slots(me, heading, [p for p, _ in enemies_seen], [np.hypot(*(p - me)) for p, _ in enemies_seen])
         heard = self._slots(me, heading, [p for p, _ in enemies_heard], [d for _, d in enemies_heard])
 
-        # extra numbers: where am I, which way am I looking, how far through the round, still hiding phase?
+        # extra numbers: where am I, which way am I looking, how far through the round, still hiding phase, am I running?
         vec = np.array([
             me[0] / self.W,
             me[1] / self.H,
@@ -396,6 +402,7 @@ class HideSeekEnv:
             np.sin(heading),
             self.t / cfg.MAX_STEPS,
             float(self.t < cfg.HIDING_PHASE),
+            float(running),
         ], dtype=np.float32)
 
         M = cfg.MINIMAP_SIZE
@@ -418,14 +425,14 @@ class HideSeekEnv:
             mates = [self.seekers[k] for k in range(ns) if k != i]
             seen = [(self.hiders[j], None) for j in np.where(self.seeker_sees[i])[0]]
             heard = [(self.hiders[j], self.sound_dist[i, j]) for j in np.where(self.seeker_hears[i] & self.hider_alive)[0]]
-            seekers_obs.append(self._agent_obs(i, self.seekers[i], self.seeker_heading[i], mates, seen, heard,
+            seekers_obs.append(self._agent_obs(i, self.seekers[i], self.seeker_heading[i], self.seeker_running[i], mates, seen, heard,
                                                self.seeker_memory[i], small["seekers"]))
         hiders_obs = []
         for j in range(self.n_hiders):
             mates = [p for k, p in enumerate(self.hiders) if k != j and self.hider_alive[k]]
             seen = [(self.seekers[i], None) for i in np.where(self.hider_sees[j])[0]]
             heard = [(self.seekers[i], self.sound_dist[i, j]) for i in np.where(self.hider_hears[j])[0]]
-            hiders_obs.append(self._agent_obs(ns + j, self.hiders[j], self.hider_heading[j], mates, seen, heard,
+            hiders_obs.append(self._agent_obs(ns + j, self.hiders[j], self.hider_heading[j], self.hider_running[j], mates, seen, heard,
                                               self.hider_memory[j], small["hiders"]))
         return {"seekers": seekers_obs, "hiders": hiders_obs}
 

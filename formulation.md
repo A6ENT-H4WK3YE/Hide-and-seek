@@ -7,7 +7,7 @@ points to a section here, and every training run's `run_card.md` records it.
 
 ## v3: walk or run, with footsteps you can hear
 
-The current version. Everything in v2.1 (below) stays, plus sound. Default map is now `three_sites.txt`
+The current version is v3.1: the same, except walk / run is a mode you switch (see the v3.1 changelog). Everything in v2.1 (below) stays, plus sound. Default map is now `three_sites.txt`
 (250-step rounds, 30-step hiding phase).
 
 ### Actions
@@ -234,6 +234,20 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
 - **Watch out (not changed yet):** with 250-step rounds the anti-farming margin is almost gone. Watching a hider from 0.9
   away for a whole round pays +30.0, catching it at once +30.1 (undiscounted). With the 0.99 discount the agents actually
   compare about +15 against +30, so catching still wins, but a fix is due (for example scaling the seen reward by round length).
+
+### v3.1: walk / run becomes a mode you switch, starting in walk (plus an opponent pool covering the whole run)
+- **What changed in the game:** the third action part is now "keep my mode" or "switch walk / run" instead of picking walk
+  or run fresh every step. Every round starts in walk mode, frozen seekers cannot switch, and the agent's numbers ("vec",
+  now 7) include whether it is running. Everything else is identical to v3.
+- **Why:** in v3 hiders ran 79% of the time, and the same trained hiders forced to walk were caught far less (seekers'
+  self-play wins 77% -> 48%). Being quiet only pays if you keep it up for many steps, which is hard to stumble on when
+  walk or run is a fresh coin flip every step. With a mode that stays on, one decision keeps you quiet, and quiet is the default.
+- **Training change made at the same time (Moeez asked for both together, so the result cannot be split between them):**
+  the opponent pool now spans the whole run. When it is full (20 snapshots), every second snapshot is dropped and snapshots
+  are taken half as often, so it always runs evenly from the first random network to the latest. Before, it only held the
+  last ~400k steps, so after the seekers got good every frozen seeker the hiders met was already strong.
+- **Bots:** they switch whenever their mode is not the one they want (chaser always runs, fleeing hider walks while
+  waiting and runs while fleeing). Reference numbers on three_sites 2v1: chaser v random hider 97%, chaser v fleeing bot 78%.
 
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.

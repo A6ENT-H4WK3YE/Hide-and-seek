@@ -42,11 +42,11 @@ SOUND_MAP = """\
 """
 # (1, 4) and (1, 6) are 2 apart in a straight line, but 10 steps apart walking round the wall via row 5
 
-# actions are (move, turn, speed): speed 0 = walk (half speed, silent), 1 = run (full speed, makes noise)
-STAY = [0, NO_TURN, 0]
-FORWARD = [1, NO_TURN, 1]
-WALK_FORWARD = [1, NO_TURN, 0]
-RUN_IN_PLACE = [0, NO_TURN, 1]
+# actions are (move, turn, switch): switch 1 flips the walk / run mode, 0 keeps it.
+# place() below puts agents in run mode unless told otherwise (most checks are about full-speed moves).
+KEEP, SWITCH = 0, 1
+STAY = [0, NO_TURN, KEEP]
+FORWARD = [1, NO_TURN, KEEP]
 TURN_90 = cfg.TURN_ANGLES.index(90)
 
 
@@ -59,8 +59,8 @@ def make_env(text, n_seekers=1, n_hiders=1):
     return env
 
 
-def place(env, seekers, hiders, t=None):
-    # seekers / hiders: lists of (x, y, heading in degrees)
+def place(env, seekers, hiders, t=None, running=True):
+    # seekers / hiders: lists of (x, y, heading in degrees); everyone in run mode (or walk mode if running=False)
     env.seekers = np.array([[x, y] for x, y, _ in seekers], dtype=float)
     env.seeker_heading = np.radians([h for _, _, h in seekers])
     env.hiders = np.array([[x, y] for x, y, _ in hiders], dtype=float)
@@ -71,6 +71,8 @@ def place(env, seekers, hiders, t=None):
     env.hider_memory = np.zeros((len(hiders), env.H, env.W), dtype=np.float32)
     env.seeker_noisy = np.zeros(len(seekers), dtype=bool)
     env.hider_noisy = np.zeros(len(hiders), dtype=bool)
+    env.seeker_running = np.full(len(seekers), running)
+    env.hider_running = np.full(len(hiders), running)
     env.done, env.winner = False, None
     if t is not None:
         env.t = t
@@ -116,9 +118,10 @@ check("four 90 degree turns face the same way again", close(np.degrees(env.hider
 
 env.reset(seed=0, n_seekers=1, n_hiders=1)
 start, start_heading = env.seekers[0].copy(), env.seeker_heading[0]
-env.step([[1, TURN_90, 1]], [STAY])
-check("seekers frozen during hiding phase (no moving, no turning)",
-      np.allclose(env.seekers[0], start) and env.seeker_heading[0] == start_heading)
+check("every round starts in walk mode", not env.seeker_running.any() and not env.hider_running.any())
+env.step([[1, TURN_90, SWITCH]], [STAY])
+check("seekers frozen during hiding phase (no moving, no turning, no switching to run)",
+      np.allclose(env.seekers[0], start) and env.seeker_heading[0] == start_heading and not env.seeker_running[0])
 
 tiny = HideSeekEnv("maps/tiny.txt")
 rng = np.random.default_rng(1)
@@ -133,10 +136,18 @@ for k in range(20):
             bad += overlaps_wall(tiny.walls, p[0], p[1], cfg.AGENT_RADIUS)
 check(f"random play on the tiny map never overlaps a wall ({steps} steps)", bad == 0)
 
-place(env, seekers=[(8.5, 3.5, 0)], hiders=[(2.5, 2.5, 0)], t=HUNT)
-env.step([STAY], [WALK_FORWARD])
+place(env, seekers=[(8.5, 3.5, 0)], hiders=[(2.5, 2.5, 0)], t=HUNT, running=False)
+obs, _, _, _ = env.step([STAY], [FORWARD])
 check(f"walking moves at {cfg.WALK_SPEED_FACTOR} x running speed (x {env.hiders[0, 0]:.2f})",
       close(env.hiders[0, 0], 2.5 + cfg.WALK_SPEED_FACTOR * cfg.MOVE_SPEED))
+check("the agent can see its own mode (last number in vec: 0 = walking)", obs["hiders"][0]["vec"][-1] == 0.0)
+obs, _, _, _ = env.step([STAY], [[1, NO_TURN, SWITCH]])
+check(f"switching turns on run mode, at full speed straight away (x {env.hiders[0, 0]:.2f})",
+      env.hider_running[0] and close(env.hiders[0, 0], 3.0 + cfg.MOVE_SPEED) and obs["hiders"][0]["vec"][-1] == 1.0)
+env.step([STAY], [FORWARD])
+check("run mode stays on until switched again", env.hider_running[0] and close(env.hiders[0, 0], 5.0))
+env.step([STAY], [[0, NO_TURN, SWITCH]])
+check("switching again goes back to walking", not env.hider_running[0])
 
 # ======================================================================
 # vision
@@ -278,13 +289,13 @@ check(f"heard slot: behind the seeker, walking distance 4: {np.round(obs['seeker
       np.allclose(obs["seekers"][0]["heard"][0], [1, -1, 0, 4 / cfg.RAY_NORM], atol=1e-5))
 check("a heard enemy is marked in the seeker's memory", snd.seeker_memory[0, 5, 3] == 1.0)
 
-place(snd, seekers=[(7.5, 5.5, 0)], hiders=[(4.5, 5.5, 180)], t=HUNT)
-obs, _, _, _ = snd.step([STAY], [WALK_FORWARD])
+place(snd, seekers=[(7.5, 5.5, 0)], hiders=[(4.5, 5.5, 180)], t=HUNT, running=False)
+obs, _, _, _ = snd.step([STAY], [FORWARD])
 check("walking is silent: not heard", not snd.hider_noisy[0] and not snd.seeker_hears[0, 0]
       and not obs["seekers"][0]["heard"].any())
 
 place(snd, seekers=[(7.5, 5.5, 0)], hiders=[(4.5, 5.5, 180)], t=HUNT)
-snd.step([STAY], [RUN_IN_PLACE])
+snd.step([STAY], [STAY])
 check("running on the spot (not moving) makes no noise", not snd.hider_noisy[0])
 
 place(snd, seekers=[(6.5, 1.5, 0)], hiders=[(4.5, 1.5, 90)], t=HUNT)
@@ -301,7 +312,7 @@ obs, _, _, _ = snd.step([FORWARD, STAY], [STAY])
 check("teammates' footsteps are not reported as heard enemies", not obs["seekers"][1]["heard"].any())
 
 snd.reset(seed=0, n_seekers=1, n_hiders=1)
-snd.step([FORWARD], [STAY])
+snd.step([[1, NO_TURN, SWITCH]], [STAY])
 check("seekers frozen in the hiding phase make no noise", not snd.seeker_noisy[0])
 
 # ======================================================================

@@ -81,8 +81,8 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- git commit: {git_commit()}\n")
     f.write(f"- device: {device}\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
-    f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + heard ({cfg.MAX_TEAM_SIZE}, 4) + vec (6,) + minimap, "
-            f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES} x walk/run, "
+    f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + heard ({cfg.MAX_TEAM_SIZE}, 4) + vec (7,) + minimap, "
+            f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES} x keep/switch walk-run mode, "
             f"walk speed x{cfg.WALK_SPEED_FACTOR}, hearing range {cfg.HEARING_RANGE}\n")
     f.write(f"- rewards (seekers; hiders get minus): seen {cfg.REWARD_SEEN:+} x closeness, unseen {cfg.REWARD_UNSEEN:+}, "
             f"per catch {cfg.REWARD_CATCH:+}, win {cfg.REWARD_WIN:+} plus up to {cfg.REWARD_TIME_BONUS:+} for time left, "
@@ -108,6 +108,7 @@ opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, ep
 # pool[team] holds frozen snapshots of that team's network from earlier in training.
 # past_nets[team] is the snapshot that team plays with, in games where it is "frozen".
 pool = {team: [copy.deepcopy(nets[team].state_dict())] for team in TEAMS}
+snapshot_every = cfg.SNAPSHOT_EVERY     # doubles each time the pool fills up (see the main loop)
 past_nets = {team: TeamNet().to(device) for team in TEAMS}
 pool_rng = np.random.default_rng(cfg.SEED + 1)
 
@@ -451,12 +452,17 @@ try:
             stats[team] = ppo_update(team, buf[team], last_value)
         update += 1
 
-        # every SNAPSHOT_EVERY updates, freeze a copy of both teams into the pool
-        if cfg.OPPONENT_POOL and update % cfg.SNAPSHOT_EVERY == 0:
+        # every snapshot_every updates, freeze a copy of both teams into the pool.
+        # When the pool is full, keep every second snapshot and take snapshots half as often from then on,
+        # so the pool always covers the whole run evenly (old, weaker opponents included), not just the latest part.
+        if cfg.OPPONENT_POOL and update % snapshot_every == 0:
             for team in TEAMS:
                 pool[team].append(copy.deepcopy(nets[team].state_dict()))
-                if len(pool[team]) > cfg.POOL_SIZE:
-                    pool[team].pop(0)
+            if len(pool["seekers"]) > cfg.POOL_SIZE:
+                for team in TEAMS:
+                    pool[team] = pool[team][::2]
+                snapshot_every *= 2
+                print(f"  -> opponent pool full: kept every second snapshot, now one every {snapshot_every} updates")
 
         # ---------------- logging ----------------
         sps = steps_done / (time.time() - start_time)

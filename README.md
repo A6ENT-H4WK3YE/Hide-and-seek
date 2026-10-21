@@ -4,7 +4,7 @@ FPS-style hide and seek with line of sight, trained with multi-agent reinforceme
 
 Two teams on a map with walls, in continuous space. Hiders try to stay out of sight, seekers try to find and catch them. Each agent looks in one direction and only sees what is inside its 90 degree vision cone, so walls, corners and which way you face all matter. No shooting or planting, just hiding and hunting.
 
-This is v3 (v2 plus footsteps). The earlier grid version (360 degree vision, one cell per step) is kept in git under the tag `v1-grid`.
+This is v3.1 (v2 plus footsteps, with walk / run as a mode you switch). The earlier grid version (360 degree vision, one cell per step) is kept in git under the tag `v1-grid`.
 
 ## Maps
 
@@ -32,7 +32,7 @@ python preview_map.py maps/three_sites.txt
 ## Rules
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
-- **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and walk or run.
+- **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and whether to switch between walking and running (the mode stays until switched; every round starts walking).
 - **Sound:** running is full speed (1 unit per step) but enemies within 6 cells of walking distance hear you; walking is half speed and silent. Sound goes round corners, not through walls.
 - **Teams:** 2 seekers v 1 hider for now (variable sizes later).
 - **Hiding phase:** seekers are frozen for the first 15 steps so hiders can get into position.
@@ -103,7 +103,9 @@ Each run gets its own folder in `runs/` with a `run_card.md` (every setting, gam
 
 **Opponent pool:** plain self-play can go round in circles (hiders pick a side, seekers learn that side,
 hiders switch...). With `OPPONENT_POOL = True`, half the games are played against frozen past versions
-of the other team, so agents must learn strategies that work against many opponents.
+of the other team, so agents must learn strategies that work against many opponents. The pool keeps snapshots
+spread evenly over the whole run (from the first random network to the latest), so the losing team also meets weaker
+opponents it can still beat.
 
 **Benchmark bots:** at every recording, the trained teams also play the scripted bots in `bots.py`, logged in
 `bots.csv` and the "vs fixed benchmark bots" panel of `curves.png`. In 2v1 on the tiny map the chaser bots beat a
@@ -127,7 +129,7 @@ wall, a teammate or an enemy. This is the layout in front of it, like a very low
 (inside anyone's cone in the last 10 steps, shared, fading) and its own "last seen enemy" memory.
 Same size on every map, so a network trained on the tiny map can move to the big one.
 
-**Plus 6 numbers:** its position, which way it looks, how far through the round it is, and whether it's still the hiding phase.
+**Plus 7 numbers:** its position, which way it looks, how far through the round it is, whether it's still the hiding phase, and whether it's running.
 
 ## Setup notes
 
