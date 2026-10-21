@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 
 import config as cfg
 from env import HideSeekEnv
+from workers import ParallelGames
 from model import TeamNet, get_device, OBS_KEYS, ACTION_PARTS, obs_to_tensors
 from render import draw_frame, save_gif
 from bots import Bots
@@ -79,7 +80,7 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- started: {datetime.datetime.now():%Y-%m-%d %H:%M}\n")
     f.write(f"- game version: {cfg.GAME_VERSION} (see formulation.md)\n")
     f.write(f"- git commit: {git_commit()}\n")
-    f.write(f"- device: {device}\n")
+    f.write(f"- device: {device}, {cfg.N_WORKERS} game workers\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
     f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + heard ({cfg.MAX_TEAM_SIZE}, 4) + vec (7,) + minimap, "
             f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES} x keep/switch walk-run mode, "
@@ -97,8 +98,12 @@ print(f"run: {run_dir}   device: {device}")
 # ======================================================================
 # environments, networks, optimisers
 # ======================================================================
-envs = [HideSeekEnv(cfg.MAP_FILE) for _ in range(E)]
-obs = [env.reset(seed=cfg.SEED + i, n_seekers=cfg.N_SEEKERS, n_hiders=cfg.N_HIDERS) for i, env in enumerate(envs)]
+# the E training games run in parallel worker processes (see workers.py), one per CPU core
+games = ParallelGames(cfg.MAP_FILE, [cfg.SEED + i for i in range(E)], cfg.N_SEEKERS, cfg.N_HIDERS, cfg.N_WORKERS)
+obs = games.reset()
+# what this process needs to know about each game before stepping it (the games themselves live in the workers)
+game_t = np.zeros(E, dtype=int)                                  # step count
+game_alive = np.ones((E, cfg.N_HIDERS), dtype=bool)             # which hiders are still in
 eval_env = HideSeekEnv(cfg.MAP_FILE)
 
 nets = {team: TeamNet().to(device) for team in TEAMS}
@@ -409,14 +414,17 @@ try:
                 b["value"][t] = value.cpu().numpy().reshape(E, n)
                 actions[team] = act
 
-            for e, env in enumerate(envs):
-                hunting = env.t >= cfg.HIDING_PHASE
-                alive_before = env.hider_alive.copy()
+            # all games step at once in the workers; finished games come back already reset
+            hunting_before = game_t >= cfg.HIDING_PHASE
+            alive_before_all = game_alive.copy()
+            new_obs, rewards, dones, infos = games.step(actions["seekers"], actions["hiders"])
+
+            for e in range(E):
+                hunting, alive_before = hunting_before[e], alive_before_all[e]
+                o, r, done, info = new_obs[e], rewards[e], dones[e], infos[e]
                 # frozen past versions don't learn, so their steps never count
                 buf["seekers"]["valid"][t, e] = float(hunting and frozen_team[e] != "seekers")
                 buf["hiders"]["valid"][t, e] = alive_before.astype(np.float32) * float(frozen_team[e] != "hiders")
-
-                o, r, done, info = env.step(actions["seekers"][e], actions["hiders"][e])
 
                 newly_caught = alive_before & ~info["hider_alive"]
                 buf["seekers"]["reward"][t, e] = r["seekers"]
@@ -439,7 +447,9 @@ try:
                         recent_hider_return.append(ep_hider_return[e])
                     ep_hider_return[e], ep_spotted[e], ep_hunting[e] = 0, 0, 0
                     frozen_team[e] = pick_frozen_team()
-                    o = env.reset(n_seekers=cfg.N_SEEKERS, n_hiders=cfg.N_HIDERS)
+                    game_t[e], game_alive[e] = 0, True       # the worker already started the next round
+                else:
+                    game_t[e], game_alive[e] = info["t"], info["hider_alive"]
                 obs[e] = o
             steps_done += E
 
@@ -500,6 +510,7 @@ try:
 except KeyboardInterrupt:
     print("\nstopped by you (Ctrl+C), saving before exit")
 
+games.close()
 record(games_done, steps_done)
 plot_curves()
 minutes = (time.time() - start_time) / 60

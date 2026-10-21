@@ -87,7 +87,11 @@ ENT_COEF = 0.01         # bonus for keeping the policy random (exploration)
 VF_COEF = 0.5           # weight of the value (critic) loss
 MAX_GRAD_NORM = 0.5     # gradient clipping for stability
 HIDDEN = 256            # size of the network's hidden layers
-DEVICE = "cpu"         # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU
+DEVICE = "cpu"          # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU.
+                        # CPU is faster here: the network is small and acts on only 32 agents at a time (measured:
+                        # choosing actions 16x slower on the Mac GPU, learning no faster)
+N_WORKERS = 16          # the games run in this many parallel processes (workers.py); one per game was fastest
+                        # (6x faster game stepping than one process on a 15-core M5 Pro)
 
 # ---------- opponent pool (stops self-play going round in circles) ----------
 # Plain self-play can cycle: hiders pick a side, seekers learn that side, hiders switch, and so on.

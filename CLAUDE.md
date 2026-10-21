@@ -29,8 +29,13 @@ optimisation (MDPs, Q-learning, stochastic games, Nash equilibria, multi-agent R
 
 - MacBook (university-managed), Python 3.9.6 in `.venv` (`source .venv/bin/activate`). **Keep code
   Python 3.9 compatible:** no `X | Y` type hints, no `match` statements.
-- Training on **CPU** (`DEVICE = "cpu"` in config). MPS (Mac GPU) was slower for this small network.
-  CPU smoke run: about 1,200 steps/s in 1v1, about 730 steps/s in 2v1 with the minimap.
+- The Mac is an **Apple M5 Pro, 15 cores** (5 performance, 10 efficiency).
+- Training on **CPU** (`DEVICE = "cpu"` in config). Measured again on v3.1 (2026-10-21): the Mac GPU (MPS) is 16x slower
+  at choosing actions (tiny network, only 32 agents at a time) and no faster at learning. The game itself was the
+  bottleneck, on one core.
+- **Games run in parallel worker processes** (`workers.py`, `N_WORKERS = 16`, one per game, 6x faster game stepping,
+  identical results to one process). Training speed on the big map went from about 880 to about 2,300 steps/s, so a 5M
+  run is about 45 minutes. The bot benchmarks at each recording still run in one process (about 10 minutes of a 5M run).
 - Long runs: `caffeinate -i python train.py` so the Mac does not sleep.
 - GitHub repo: `A6ENT-H4WK3YE/Hide-and-seek`. There is also a GitHub Codespace copy (2 cores, slow);
   the Mac is the main machine now. Commit and push before switching machines.
@@ -64,6 +69,7 @@ model.py        TeamNet: one network per team, shared by teammates (parameter sh
 train.py        PPO self-play, opponent pool, run card, metrics, GIFs, checkpoints, bot benchmarks
 evaluate.py     plays a checkpoint against random players and the bots
 bots.py         scripted chaser seeker and fleeing hider (fixed benchmarks)
+workers.py      runs the training games in parallel processes (one per CPU core)
 matches.py      plays any mix of trained / bot / random players
 test_env.py     rule checks (must say "all checks passed")
 random_demo.py  random agents: one GIF plus baseline win rates and speed

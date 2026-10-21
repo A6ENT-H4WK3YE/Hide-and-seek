@@ -46,6 +46,7 @@ python preview_map.py maps/three_sites.txt
 - **Algorithm:** PPO, one shared policy per team (parameter sharing), so the same network works for any team size.
 - **Self-play:** both teams learn at the same time against each other.
 - **Partial observability:** each agent sees only its own cone (as rays), plus a minimap with a "last seen" memory of enemies and the team's shared "searched recently" memory. A recurrent network (GRU) comes later.
+- **Parallel games:** the training games run in separate worker processes (`N_WORKERS` in config), one per CPU core; the network stays on the CPU in the main process (faster than a GPU for a network this small).
 - **Training is headless.** Metrics are logged every game; a GIF and a checkpoint are saved every few thousand games from a fixed evaluation map.
 
 ## Repo layout
@@ -63,6 +64,7 @@ model.py       TeamNet: rays + enemies + minimap in, move and turn choices + val
 train.py       PPO self-play training loop
 evaluate.py    play a checkpoint against random players and the bots to check it learned
 bots.py        scripted chaser seeker and fleeing hider, used as fixed benchmarks
+workers.py     run the training games in parallel processes, so every CPU core is used
 matches.py     play any mix of trained / bot / random players (used by train and evaluate)
 formulation.md the exact game definition for each version
 notebooks/     paste-and-run Colab versions
