@@ -302,6 +302,26 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   The previous run with these starting points (`runs/v3.3_both_*`) was stopped at 213k steps to make this change; seekers
   had gone from 2% to 10% of self-play by then.
 
+### v3.5: hiders get a learned memory; no noise cost; win / loss reward doubled
+Several changes in one run, at Moeez's request; the behaviour measurements separate them where possible
+(running away when a seeker is heard: noise cost; varying the hiding spot: memory and the bigger win / loss reward).
+- **Hider memory (model, not the game):** a GRU carried from step to step within a round and wiped at the start of the
+  next, so a hider can remember where it has been, what it heard and which plan it chose. Its output joins the normal
+  features through a layer that starts at zero, so the hiders begin exactly as the v3.4 hiders (checked: identical
+  action probabilities). Training replays each hider's steps in order (checked: replay matches play to 3e-6 across
+  round ends). Seekers keep their network without memory.
+- **No noise cost** (`HIDER_NOISE_COST` 0.02 -> 0): hiders now walk 100% of the time, and the cost stopped them ever
+  running away (when a v3.4 hider heard a seeker it never ran, and the seeker closed in by 0.5 per step). The game is
+  zero-sum again.
+- **Win / loss reward doubled** (`REWARD_WIN` 10 -> 20, `REWARD_LOSS` -10 -> -20): the round result counts for more,
+  for hiders (surviving) and for seekers (searching further). Also restores the anti-farming margin: watching a hider
+  from 0.9 away for a whole round is worth about +20, catching it about +40.
+- **Why (Moeez):** in v3.4 the hiders were silent but all went to site A, and the seekers learned that. He preferred
+  letting hiders learn to vary their spot through memory over handing them a random "plan" number.
+- **Run:** both teams learn, seekers from the v3.4 seekers, hiders from the v3.4 hiders with the memory added.
+- **GIFs (not the game):** sound is drawn (a dotted circle shows how far a running agent's footsteps carry, a yellow
+  dotted line joins each listener to the footsteps it hears, "HEARD" in the title), and GIFs play at half speed (3 fps).
+
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.
   This changes how agents learn, not what the game is, so it does not get a game version.

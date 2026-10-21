@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import config as cfg
 from env import HideSeekEnv, load_map
 from workers import ParallelGames
-from model import TeamNet, get_device, OBS_KEYS, ACTION_PARTS, obs_to_tensors
+from model import make_net, get_device, OBS_KEYS, ACTION_PARTS, obs_to_tensors
 from render import draw_frame, save_gif
 from bots import Bots
 from matches import play_match
@@ -112,11 +112,13 @@ game_t = np.zeros(E, dtype=int)                                  # step count
 game_alive = np.ones((E, cfg.N_HIDERS), dtype=bool)             # which hiders are still in
 eval_env = HideSeekEnv(cfg.MAP_FILE)
 
-nets = {team: TeamNet().to(device) for team in TEAMS}
-# teams that start from a saved network (START_FROM) instead of from scratch
+nets = {team: make_net(team).to(device) for team in TEAMS}
+# teams that start from a saved network (START_FROM) instead of from scratch. A team with memory loaded from a network
+# saved without one gets an empty memory that starts switched off, so it plays exactly as the saved network did.
 for team, path in cfg.START_FROM.items():
-    nets[team].load_state_dict(torch.load(path, map_location=device, weights_only=False)[team])
-    print(f"{team} start from {path}")
+    missing, unexpected = nets[team].load_state_dict(torch.load(path, map_location=device, weights_only=False)[team], strict=False)
+    assert not unexpected and all(k.startswith(("gru.", "mem_out.")) for k in missing), (missing, unexpected)
+    print(f"{team} start from {path}" + (" (memory added, starts switched off)" if missing else ""))
 opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, eps=1e-5) for team in cfg.TRAIN_TEAMS}
 
 # ---------- opponent pool ----------
@@ -124,7 +126,7 @@ opts = {team: torch.optim.Adam(nets[team].parameters(), lr=cfg.LEARNING_RATE, ep
 # past_nets[team] is the snapshot that team plays with, in games where it is "frozen".
 pool = {team: [copy.deepcopy(nets[team].state_dict())] for team in cfg.TRAIN_TEAMS}
 snapshot_every = cfg.SNAPSHOT_EVERY     # doubles each time the pool fills up (see the main loop)
-past_nets = {team: TeamNet().to(device) for team in TEAMS}
+past_nets = {team: make_net(team).to(device) for team in TEAMS}
 pool_rng = np.random.default_rng(cfg.SEED + 1)
 
 # ---------- teams that do not learn ----------
@@ -196,8 +198,10 @@ OBS_SHAPES = {key: x.shape for key, x in obs[0]["seekers"][0].items()}
 
 
 # storage for one rollout, per team: index [step, game, agent]
-def new_buffer(n):
+def new_buffer(n, memory):
+    extra = {"h": np.zeros((T, E, n, cfg.HIDDEN), dtype=np.float32)} if memory else {}   # memory going into each step
     return {
+        **extra,
         **{key: np.zeros((T, E, n) + OBS_SHAPES[key], dtype=np.float32) for key in OBS_KEYS},
         "action": np.zeros((T, E, n, ACTION_PARTS), dtype=np.int64),     # (move, turn, speed) per agent
         "logp": np.zeros((T, E, n), dtype=np.float32),
@@ -211,7 +215,12 @@ def new_buffer(n):
     }
 
 
-buf = {team: new_buffer(N_AGENTS[team]) for team in TEAMS}
+buf = {team: new_buffer(N_AGENTS[team], nets[team].memory) for team in TEAMS}
+round_end = np.zeros((T, E), dtype=np.float32)    # 1 where a game's round ended at that step (memory is wiped after it)
+
+# each agent's memory during play (None for a team without memory), for the current and the past networks
+hidden = {team: nets[team].initial_state(E * N_AGENTS[team], device) for team in TEAMS}
+past_hidden = {team: past_nets[team].initial_state(E * N_AGENTS[team], device) for team in TEAMS}
 
 
 # ======================================================================
@@ -221,11 +230,12 @@ def record(games_done, steps_done):
     o = eval_env.reset(seed=cfg.FIXED_EVAL_SEED, n_seekers=cfg.N_SEEKERS, n_hiders=cfg.N_HIDERS)
     frames = [draw_frame(eval_env)]
     done = False
+    h = {team: nets[team].initial_state(len(o[team]), device) for team in TEAMS}
     while not done:
         acts = {}
         for team in TEAMS:
             with torch.no_grad():
-                a, _, _ = nets[team].act(to_device(stack_team([o], team)))
+                a, _, _, h[team] = nets[team].act(to_device(stack_team([o], team)), h[team])
             acts[team] = a.cpu().numpy()
         o, _, done, info = eval_env.step(acts["seekers"], acts["hiders"])
         frames.append(draw_frame(eval_env))
@@ -335,6 +345,9 @@ def ppo_update(team, b, last_value):
         adv[t] = carry
     returns = adv + b["value"]              # target for the critic
 
+    if nets[team].memory:
+        return ppo_update_sequences(team, b, adv, returns)
+
     # --- keep only the steps that count, as flat arrays ---
     keep = b["valid"].reshape(-1) > 0
     n = int(keep.sum())
@@ -381,6 +394,58 @@ def ppo_update(team, b, last_value):
     return {k: float(np.mean(vals)) for k, vals in stats.items()}
 
 
+def ppo_update_sequences(team, b, adv, returns):
+    # The PPO update for a team with memory. Instead of shuffling single steps, it learns from whole sequences
+    # (one per game and agent: the rollout in order), replaying the memory from the state it had at the start of
+    # the rollout and wiping it wherever a round ended, exactly as during play. Steps that don't count are masked out.
+    n_ag = N_AGENTS[team]
+    S = E * n_ag
+    seq = lambda x, dtype=torch.float32: torch.as_tensor(x.reshape((T, S) + x.shape[3:]), dtype=dtype, device=device)
+    o = {key: seq(b[key]) for key in OBS_KEYS}
+    actions = seq(b["action"], torch.int64)
+    old_logp, adv_t, ret_t, valid = seq(b["logp"]), seq(adv), seq(returns), seq(b["valid"])
+    h0 = seq(b["h"])[0]
+    starts = np.zeros((T, E), dtype=np.float32)
+    starts[1:] = round_end[:-1]
+    starts = torch.as_tensor(np.repeat(starts, n_ag, axis=1), device=device)
+    n_valid = valid.sum()
+    if n_valid < 2:
+        return {}
+    # normalise advantages once over the steps that count
+    mean = (adv_t * valid).sum() / n_valid
+    std = torch.sqrt((((adv_t - mean) * valid) ** 2).sum() / n_valid)
+    adv_t = (adv_t - mean) / (std + 1e-8)
+
+    net, opt = nets[team], opts[team]
+    stats = {"pg_loss": [], "v_loss": [], "entropy": [], "approx_kl": [], "clip_frac": []}
+    for epoch in range(cfg.PPO_EPOCHS):
+        perm = torch.randperm(S, device=device)
+        for idx in torch.tensor_split(perm, cfg.MINIBATCHES):
+            new_logp, entropy, value = net.evaluate_sequence({key: x[:, idx] for key, x in o.items()}, actions[:, idx],
+                                                             h0[idx], starts[:, idx])
+            v = valid[:, idx]
+            nv = v.sum().clamp(min=1.0)
+            a = adv_t[:, idx]
+            ratio = torch.exp(new_logp - old_logp[:, idx])
+            pg_loss = -(torch.min(ratio * a, torch.clamp(ratio, 1 - cfg.CLIP_EPS, 1 + cfg.CLIP_EPS) * a) * v).sum() / nv
+            v_loss = 0.5 * (((value - ret_t[:, idx]) ** 2) * v).sum() / nv
+            ent = (entropy * v).sum() / nv
+            loss = pg_loss + cfg.VF_COEF * v_loss - cfg.ENT_COEF * ent
+
+            opt.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(net.parameters(), cfg.MAX_GRAD_NORM)
+            opt.step()
+
+            with torch.no_grad():
+                stats["pg_loss"].append(pg_loss.item())
+                stats["v_loss"].append(v_loss.item())
+                stats["entropy"].append(ent.item())
+                stats["approx_kl"].append((((ratio - 1) - torch.log(ratio)) * v).sum().item() / nv.item())
+                stats["clip_frac"].append((((ratio - 1).abs() > cfg.CLIP_EPS).float() * v).sum().item() / nv.item())
+    return {k: float(np.mean(vals)) for k, vals in stats.items()}
+
+
 # ======================================================================
 # main loop
 # ======================================================================
@@ -424,20 +489,23 @@ try:
                 n = N_AGENTS[team]
                 o_np = stack_team(obs, team)
                 o_t = to_device(o_np)
+                h_in = hidden[team]
                 with torch.no_grad():
-                    a, logp, value = nets[team].act(o_t)
+                    a, logp, value, hidden[team] = nets[team].act(o_t, h_in)
                 act = a.cpu().numpy().reshape(E, n, ACTION_PARTS)
 
                 # games where this team plays as a frozen past version: use the past network's actions
                 frozen_here = np.array([frozen_team[e] == team for e in range(E)])
                 if frozen_here.any():
                     with torch.no_grad():
-                        past_a, _, _ = past_nets[team].act(o_t)
+                        past_a, _, _, past_hidden[team] = past_nets[team].act(o_t, past_hidden[team])
                     act = np.where(frozen_here[:, None, None], past_a.cpu().numpy().reshape(E, n, ACTION_PARTS), act)
 
                 b = buf[team]
                 for key in OBS_KEYS:
                     b[key][t] = o_np[key].reshape((E, n) + OBS_SHAPES[key])
+                if h_in is not None:
+                    b["h"][t] = h_in.cpu().numpy().reshape(E, n, cfg.HIDDEN)
                 b["action"][t] = act
                 b["logp"][t] = logp.cpu().numpy().reshape(E, n)
                 b["value"][t] = value.cpu().numpy().reshape(E, n)
@@ -447,6 +515,16 @@ try:
             hunting_before = game_t >= cfg.HIDING_PHASE
             alive_before_all = game_alive.copy()
             new_obs, rewards, dones, infos = games.step(actions["seekers"], actions["hiders"])
+            round_end[t] = np.array(dones, dtype=np.float32)
+            # wipe the memory of every agent whose round just ended (the next step is a new round)
+            if round_end[t].any():
+                for team in TEAMS:
+                    keep_mem = torch.as_tensor(np.repeat(1.0 - round_end[t], N_AGENTS[team]), dtype=torch.float32,
+                                               device=device).unsqueeze(1)
+                    if hidden[team] is not None:
+                        hidden[team] = hidden[team] * keep_mem
+                    if past_hidden[team] is not None:
+                        past_hidden[team] = past_hidden[team] * keep_mem
 
             for e in range(E):
                 hunting, alive_before = hunting_before[e], alive_before_all[e]
@@ -487,7 +565,7 @@ try:
         stats = {team: {} for team in TEAMS}
         for team in cfg.TRAIN_TEAMS:
             with torch.no_grad():
-                _, _, last_value = nets[team].act(to_device(stack_team(obs, team)))
+                _, _, last_value, _ = nets[team].act(to_device(stack_team(obs, team)), hidden[team])
             last_value = last_value.cpu().numpy().reshape(E, N_AGENTS[team])
             stats[team] = ppo_update(team, buf[team], last_value)
         update += 1

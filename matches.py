@@ -11,10 +11,11 @@ from render import draw_frame, save_gif
 from model import obs_to_tensors
 
 
-def trained_actions(net, obs_team, device):
+def trained_actions(net, obs_team, device, h=None):
+    # actions for one team, and its updated memory (None for a network without memory)
     with torch.no_grad():
-        a, _, _ = net.act(obs_to_tensors(obs_team, device))
-    return a.cpu().numpy()
+        a, _, _, h = net.act(obs_to_tensors(obs_team, device), h)
+    return a.cpu().numpy(), h
 
 
 def random_actions(rng, n):
@@ -32,11 +33,14 @@ def play_match(env, bots, policies, nets, games, device, seed=10_000, gif_path=N
         bots.reset()
         frames = [draw_frame(env)] if (gif_path and k == 0) else None
         done = False
+        # trained networks with memory start every game with an empty one
+        h = {team: nets[team].initial_state(len(obs[team]), device) if policies[team] == "trained" else None
+             for team in ["seekers", "hiders"]}
         while not done:
             acts = {}
             for team in ["seekers", "hiders"]:
                 if policies[team] == "trained":
-                    acts[team] = trained_actions(nets[team], obs[team], device)
+                    acts[team], h[team] = trained_actions(nets[team], obs[team], device, h[team])
                 elif policies[team] == "bot":
                     acts[team] = bots.seeker_actions() if team == "seekers" else bots.hider_actions()
                 else:

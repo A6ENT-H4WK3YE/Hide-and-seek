@@ -1,4 +1,6 @@
-# Draw the game as images and save GIFs: walls, vision cones, agents, where they look and who is making noise.
+# Draw the game as images and save GIFs: walls, vision cones, agents, where they look, and sound:
+# a running agent gets a dashed ring plus a faint dotted circle showing how far its footsteps carry, and a yellow
+# dotted line joins every agent to the enemy footsteps it hears.
 #
 #   frame = draw_frame(env)            -> RGB numpy array of the current state
 #   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF
@@ -20,6 +22,7 @@ SEEKER_VIEW = np.array([220, 70, 60]) / 255
 HIDER_VIEW = np.array([60, 120, 220]) / 255
 SEEKER_COL = "#c0392b"
 HIDER_COL = "#2563b0"
+SOUND_COL = "#e0b000"     # footsteps: hearing range circles and "who hears whom" lines
 BG = "#14161c"
 
 
@@ -59,6 +62,19 @@ def draw_frame(env, show_vision=True):
         for i in range(ns):
             ax.add_patch(Polygon(env.cone_polygon(i), closed=True, facecolor=SEEKER_VIEW, alpha=0.28, linewidth=0))
 
+    # sound: how far each running agent can be heard, and who hears whom (yellow dotted lines)
+    for positions, noisy in [(env.seekers, env.seeker_noisy), (env.hiders, env.hider_noisy & env.hider_alive)]:
+        for k, p in enumerate(positions):
+            if noisy[k]:
+                ax.add_patch(Circle((p[0], p[1]), env.hearing_range, fill=False, edgecolor=SOUND_COL, linestyle=":",
+                                    linewidth=0.8, alpha=0.6, zorder=2))
+    for i in range(ns):
+        for j in range(env.n_hiders):
+            for listener, source, hears in [(env.seekers[i], env.hiders[j], env.seeker_hears[i, j]),
+                                            (env.hiders[j], env.seekers[i], env.hider_hears[j, i])]:
+                if hears:
+                    ax.plot([listener[0], source[0]], [listener[1], source[1]], ":", color=SOUND_COL, linewidth=1.4, zorder=2)
+
     # dashed lines: which seeker can see which hider
     for i in range(ns):
         for j in range(env.n_hiders):
@@ -88,6 +104,8 @@ def draw_frame(env, show_vision=True):
     else:
         phase = "HUNTING"
     status = "SPOTTED" if env.hiders_seen.any() else "hidden"
+    if env.seeker_hears.any() or env.hider_hears.any():
+        status += "   HEARD"
     alive = int(env.hider_alive.sum())
     title = f"step {env.t}/{cfg.MAX_STEPS}   {phase}   hiders alive {alive}/{env.n_hiders}   {status}"
     if env.done:
@@ -104,7 +122,7 @@ def draw_frame(env, show_vision=True):
     return frame
 
 
-def save_gif(frames, path, fps=6):
+def save_gif(frames, path, fps=3):     # 3 frames per second: half the old speed, easier to follow
     images = [Image.fromarray(f) for f in frames]
     # hold the last frame a bit longer so you can read the result
     durations = [int(1000 / fps)] * (len(images) - 1) + [2000]

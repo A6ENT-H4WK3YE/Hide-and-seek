@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3.4"
+GAME_VERSION = "v3.5"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -59,11 +59,12 @@ REWARD_SEEN = 0.2       # per step a hider is in sight: seekers + REWARD_SEEN x 
 CLOSENESS_RANGE = 10.0  # closeness is 1 when touching, falling evenly to 0 at this distance
 REWARD_UNSEEN = -0.05   # per step no hider is in sight
 REWARD_CATCH = 10.0     # per catch
-REWARD_WIN = 10.0       # all hiders caught...
+REWARD_WIN = 20.0       # all hiders caught... (v3.5: was 10)
 REWARD_TIME_BONUS = 10.0  # ...plus up to this much more for the time left (earlier = bigger)
-REWARD_LOSS = -10.0     # hiders survive to the time limit
-HIDER_NOISE_COST = 0.02 # hiders only: they lose this every step a hider runs and moves (makes noise). This breaks the
-                        # zero-sum rule on purpose: it is a hint for the hiders while the seekers are frozen (v3.3)
+REWARD_LOSS = -20.0     # hiders survive to the time limit (v3.5: was -10)
+HIDER_NOISE_COST = 0.0  # hiders only: they lose this every step a hider runs and moves (makes noise). v3.3 used 0.02
+                        # as a hint while the seekers were frozen (it broke zero-sum on purpose); v3.5 removes it again
+                        # because hiders now walk anyway, and it stopped them ever running away
 
 # ---------- actions ----------
 # every step each agent picks two things at once:
@@ -106,9 +107,12 @@ TRAIN_TEAMS = ["seekers", "hiders"]
 FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"   # only used for a team that is not in TRAIN_TEAMS
 # Start a team from a saved network instead of from scratch ({} = everyone from scratch). It keeps learning from there.
 START_FROM = {
-    "seekers": "runs/v3.2_three_sites_2v1_20261021_170702/checkpoints/latest.pt",   # final v3.2 seekers
-    "hiders": "runs/v3.3_three_sites_2v1_20261021_185327/checkpoints/latest.pt",    # v3.3 hiders (stopped at 1.85M)
+    "seekers": "runs/v3.4_both_three_sites_2v1_20261021_193635/checkpoints/latest.pt",   # v3.4 seekers
+    "hiders": "runs/v3.4_both_three_sites_2v1_20261021_193635/checkpoints/latest.pt",    # v3.4 hiders (+ new memory)
 }
+# Teams whose network has a learned memory (a GRU, see model.py). Loading a network saved without memory adds an empty
+# memory that starts switched off, so the team plays exactly as before until it learns to use it.
+MEMORY_TEAMS = ["hiders"]
 
 # ---------- opponent pool (stops self-play going round in circles) ----------
 # Plain self-play can cycle: hiders pick a side, seekers learn that side, hiders switch, and so on.

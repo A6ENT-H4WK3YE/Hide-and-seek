@@ -13,7 +13,7 @@ import torch
 
 import config as cfg
 from env import HideSeekEnv
-from model import TeamNet, get_device
+from model import load_net, get_device
 from bots import Bots
 from matches import play_match
 
@@ -26,8 +26,7 @@ if ckpt.get("game_version") != cfg.GAME_VERSION:
     print(f"WARNING: checkpoint was trained on game {ckpt.get('game_version')}, config says {cfg.GAME_VERSION}")
 nets = {}
 for team in ["seekers", "hiders"]:
-    nets[team] = TeamNet().to(device)
-    nets[team].load_state_dict(ckpt[team])
+    nets[team] = load_net(ckpt[team], device)     # with memory if the saved network has one
     nets[team].eval()
 print(f"loaded {ckpt_path} (trained for {ckpt['games']:,} games, {ckpt['steps']:,} steps)\n")
 

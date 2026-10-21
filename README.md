@@ -21,7 +21,8 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | v3.1 | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | done (tag `v3.1`; run stopped at 3.4M steps) |
 | v3.2 | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | done (seekers dominate) |
 | v3.3 | hiders pay a small cost for making noise, and are retrained alone against the frozen v3.2 seekers | done (the new hiders beat the old seekers) |
-| **v3.4** | the team's "searched recently" memory lasts a minute instead of 10 seconds; both teams learn again from their trained networks | **current**: hiders silent but always at site A, seekers win 97% |
+| v3.4 | the team's "searched recently" memory lasts a minute instead of 10 seconds; both teams learn again from their trained networks | done: hiders silent but always at site A, seekers win 97% |
+| **v3.5** | hiders get a learned memory; no noise cost; bigger win / loss reward | **current**, training |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -83,7 +84,7 @@ Check and preview any map (also confirms every walkable cell is reachable):
 python preview_map.py maps/three_sites.txt
 ```
 
-## Rules (v3.4)
+## Rules (v3.5)
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
 - **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and whether to switch between walking and running (the mode stays until switched; every round starts walking).
@@ -93,14 +94,14 @@ python preview_map.py maps/three_sites.txt
 - **Vision:** a 90 degree cone, no range limit, blocked by walls. Enemies are checked exactly (straight line between centres). A seeker can see a hider's back without being seen.
 - **Catch:** a seeker catches a hider it can see within 0.8 units, if the hider is within 30 degrees of where the seeker looks.
 - **Round end:** 250 steps on the big map, 100 on the tiny one (hiders win if any survive), or all hiders caught (seekers win).
-- **Reward (team based, zero-sum):** seekers get a little each step a hider is in sight (more when closer) and lose a little each step none is; +10 per catch; +10 plus a bonus for time left when all are caught; -10 if hiders survive. Hiders get exactly the opposite, plus (since v3.3) a small cost for every step they make noise. Full details in `formulation.md`.
+- **Reward (team based, zero-sum):** seekers get a little each step a hider is in sight (more when closer) and lose a little each step none is; +10 per catch; +20 plus a bonus for time left when all are caught; -20 if hiders survive. Hiders get exactly the opposite. Full details in `formulation.md`.
 
 ## Approach
 
 - **Algorithm:** PPO, one shared policy per team (parameter sharing), so the same network works for any team size.
 - **Self-play:** both teams learn at the same time against each other.
 - **Opponent pool:** half the games are played against frozen past versions of the other team, spread over the whole run, so agents must beat many opponents (stops self-play going round in circles) and the losing team still meets opponents it can beat.
-- **Partial observability:** each agent sees only its own cone (as rays) and hears nearby running enemies, plus a minimap with a "last seen" memory of enemies and the team's shared "searched recently" memory. A recurrent network (GRU) comes later.
+- **Partial observability:** each agent sees only its own cone (as rays) and hears nearby running enemies, plus a minimap with a "last seen" memory of enemies and the team's shared "searched recently" memory. Hiders also have a learned memory (a GRU) carried through each round.
 - **Parallel games:** the training games run in separate worker processes (`N_WORKERS` in config), one per CPU core; the network stays on the CPU in the main process (faster than a GPU for a network this small).
 - **Fixed benchmarks:** at every recording the trained teams also play scripted bots, whose strength never changes, so progress is visible even when self-play win rates hover.
 - **Training is headless.** Metrics are logged every update; a GIF and a checkpoint are saved every few thousand games from a fixed evaluation game.
@@ -157,7 +158,7 @@ version are measured at the start of each run and written to the run card.
 around the same value even when both are learning. `evaluate.py` plays each trained team against
 random players and the bots: trained seekers should win far more than random seekers (about 1% on the big map),
 and trained hiders should be caught by the chaser bot less often than a random hider is. Watch the GIFs too:
-a dashed ring around an agent means it ran that step and could be heard.
+a dashed ring around an agent means it ran that step, the faint dotted circle shows how far its footsteps carry, and a yellow dotted line joins every agent to the enemy footsteps it hears. GIFs play at 3 frames per second.
 
 ## What each agent sees
 

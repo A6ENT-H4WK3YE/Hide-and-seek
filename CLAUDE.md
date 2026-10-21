@@ -4,23 +4,21 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-21, night)
+## Where we left off (2026-10-21, late night)
 
-- Branch `main`, game version **v3.4**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
-  v3.4 = v3.3 (hiders pay 0.02 per noisy step, switch starts at 95% "keep") + the team "searched recently" memory lasts
-  60 steps instead of 10 (observation only, no reward change).
-- **v3.4 run done and analysed** (`runs/v3.4_both_three_sites_2v1_20261021_193635`): hiders silent but always go to
-  site A; seekers learned it and win 97 to 99%. Next decision with Moeez: how to get hiders to vary their site.
-- Earlier tonight: hiders-only v3.3 (frozen v3.2 seekers) stopped at 1.85M (`runs/v3.3_three_sites_2v1_20261021_185327`):
-  seekers won only 1.5% against the new hiders. Then both teams learning (`runs/v3.3_both_*`) stopped at 213k steps
-  (seekers recovering, 2% -> 10%) to add the longer memory.
-- After the run: who wins and how it moves over training; heatmaps (are there still dead zones for seekers?);
-  hider walk / run use (switch rate, noise); forced-walk test; lock-on and teamwork numbers; evaluate.py.
-- If dead zones remain: potential-based exploration shaping for seekers (valid: does not change the best strategy).
-  Then, one change each: double the win / loss reward; team spotting; aim reward.
-- **Always start runs with `caffeinate -i`, smoke runs too.** A smoke run started without it took 15 minutes instead of
-  2, because the Mac dozed while the screen was off.
-- Analysis scripts still live in the scratchpad (an `analyse.py` in the repo was offered, not decided).
+- Branch `main`, game version **v3.5**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
+- **v3.5 run started**, both teams learning: seekers from the v3.4 seekers, hiders from the v3.4 hiders plus a new
+  learned memory (GRU, `MEMORY_TEAMS = ["hiders"]`). Also in this run: no hider noise cost (zero-sum again), and the
+  win / loss reward doubled to 20 (catch about +40 v watching a whole round about +20). Run name `v3.5_both_*`.
+- What to check after it: do hiders vary their spot now (heatmap, share of rounds at A / B / C), do they run away when
+  they hear a seeker (run share and distance change when hearing), seekers' coverage and dead zones, who wins,
+  evaluate.py. Analysis scripts in the scratchpad need updating: networks now come from `model.load_net`, and `act`
+  takes and returns the memory (`a, logp, value, h = net.act(obs, h)`).
+- Not taken: a random "plan" number for hiders each round (Moeez: let them learn it through memory); a flee reward
+  (would be reward tweaking; removing the noise cost instead).
+- Still queued: potential-based exploration shaping for seekers if dead zones remain; team spotting; aim reward;
+  a sharper minimap (12 x 12 blurs the 1-wide corridors: hiders bump into walls on 10% of moves, seekers 4%).
+- **Always start runs with `caffeinate -i`, smoke runs and evaluations too.**
 
 ## Who you are working with
 
@@ -93,8 +91,10 @@ Roadmap (status):
 config.py       all settings in one place (GAME_VERSION, map, bodies, vision, sound, rewards, training, pool, workers)
 geometry.py     round agents sliding along square walls, ray casting (all rays at once, cell by cell, exact)
 env.py          the game: movement, vision cones, hearing, catches, rewards, observations, memory, minimap
-render.py       draws frames and GIFs (cones, heading ticks, sight lines, dashed ring = running)
-model.py        TeamNet: one network per team, shared by teammates; three action heads (move, turn, walk/run switch)
+render.py       draws frames and GIFs at 3 fps (cones, heading ticks, sight lines; sound: dashed ring = running,
+                dotted circle = how far the footsteps carry, yellow dotted line = who hears whom)
+model.py        TeamNet: one network per team, shared by teammates; three action heads (move, turn, walk/run switch);
+                optional learned memory (GRU) for teams in MEMORY_TEAMS
 train.py        PPO self-play, opponent pool, run card, metrics, GIFs, checkpoints, bot benchmarks
 workers.py      runs the training games in parallel processes (one per CPU core)
 evaluate.py     plays a checkpoint against random players and the bots
@@ -120,7 +120,7 @@ caffeinate -i python train.py        # full run (TOTAL_STEPS in config)
 python evaluate.py runs/<run>/checkpoints/latest.pt 300
 ```
 
-## The game now (v3.4, details in formulation.md)
+## The game now (v3.5, details in formulation.md)
 
 - Continuous 2D space. Every `#` of the map is a solid 1 x 1 square. Agents are circles (radius 0.3) with a position
   and a heading; they slide along walls and can overlap each other. 1 unit = 1 cell, 1 step = about 1 second.
@@ -133,8 +133,8 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
   through walls (v3.2; v3 and v3.1 used 6 cells of walking distance, which walls blocked).
 - Catch: in sight, centres within 0.8, hider within 30 degrees of where the seeker looks.
 - Rewards (seekers; hiders get exactly minus): +0.2 x closeness per step a hider is in sight, -0.05 per step none is,
-  +10 per catch, +10 plus up to +10 for time left when all are caught, -10 if hiders survive. Since v3.3 hiders
-  also pay 0.02 for every step a hider makes noise (not zero-sum any more; a hint while seekers are frozen).
+  +10 per catch, +20 plus up to +10 for time left when all are caught, -20 if hiders survive (win / loss doubled in
+  v3.5). v3.3 and v3.4 also charged hiders 0.02 per noisy step; removed in v3.5, so it is zero-sum again.
 - Round: 250 steps with a 30-step hiding phase on the big map (100 and 15 on the tiny map). 2 seekers v 1 hider.
 - Each agent observes: rays, enemies in sight, enemies heard, 7 numbers (position, heading, time, hiding phase,
   running) and a 12 x 12 minimap (walls, me, teammates, team "searched recently" fading over 60 steps since v3.4, own
@@ -160,6 +160,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
 | v3.3 | hiders pay 0.02 per noisy step; only hiders learn, against frozen v3.2 seekers (final + 17 checkpoints as pool); switch starts at 95% "keep" (all together, agreed) | v3.2 seekers won 98%; hiders flipped walk / run constantly and were heard through walls. Moeez: fix the hiders first |
 | v3.4 | team "searched recently" memory fades over 60 steps instead of 10 (no reward change); both teams learn from v3.2 seekers / v3.3 hiders | Moeez: seekers leave dead zones and forget where they searched; give them the information rather than an exploration reward |
+| v3.5 | hiders get a learned memory (GRU, starts switched off); noise cost removed; win / loss reward 10 -> 20 (together, at Moeez's request) | v3.4 hiders were silent but always at site A, and never ran away when they heard a seeker |
 
 Decisions behind v2 (agreed 2026-10-20): fixed set of 9 turns (continuous turning is a later experiment); catch 0.8 and
 30 degrees and in sight; radius 0.3, speed 1 for every direction; agents pass through each other; turn then move;
@@ -184,6 +185,7 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3.3 | big, hiders only v frozen v3.2 seekers, stopped at 1.85M | (seekers frozen) | (seekers frozen) | not evaluated | 1.5% v the final v3.2 seekers |
 | v3.3 both | big, both learning, seekers from v3.2, hiders from v3.3, stopped at 213k | not evaluated | | | 2% -> 10% |
 | v3.4 both | big, 5M, seekers from v3.2, hiders from v3.3, team memory 60 steps | 84% (chaser 100%) | 53% (chaser 91%) | **67%** (random hider 100%, fleeing bot 91%) | 97% |
+| v3.5 both | big, 5M, from v3.4, hider memory, no noise cost, win / loss 20 | training | | | |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 
