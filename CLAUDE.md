@@ -7,7 +7,7 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 ## Where we left off (2026-10-21, late night)
 
 - Branch `main`, game version **v3.5**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
-- **v3.5 run started**, both teams learning: seekers from the v3.4 seekers, hiders from the v3.4 hiders plus a new
+- **v3.5 run done and analysed** (results below), both teams learned: seekers from the v3.4 seekers, hiders from the v3.4 hiders plus a new
   learned memory (GRU, `MEMORY_TEAMS = ["hiders"]`). Also in this run: no hider noise cost (zero-sum again), and the
   win / loss reward doubled to 20 (catch about +40 v watching a whole round about +20). Run name `v3.5_both_*`.
 - What to check after it: do hiders vary their spot now (heatmap, share of rounds at A / B / C), do they run away when
@@ -185,7 +185,7 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3.3 | big, hiders only v frozen v3.2 seekers, stopped at 1.85M | (seekers frozen) | (seekers frozen) | not evaluated | 1.5% v the final v3.2 seekers |
 | v3.3 both | big, both learning, seekers from v3.2, hiders from v3.3, stopped at 213k | not evaluated | | | 2% -> 10% |
 | v3.4 both | big, 5M, seekers from v3.2, hiders from v3.3, team memory 60 steps | 84% (chaser 100%) | 53% (chaser 91%) | **67%** (random hider 100%, fleeing bot 91%) | 97% |
-| v3.5 both | big, 5M, from v3.4, hider memory, no noise cost, win / loss 20 | training | | | |
+| v3.5 both | big, 5M, from v3.4, hider memory, no noise cost, win / loss 20 | 96% (chaser 100%) | **89%** (chaser 91%) | 94% (random hider 100%, fleeing bot 91%) | 84% |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 
@@ -226,6 +226,16 @@ What the agents did (measured, not just watched):
   97 to 99% for seekers. Specialising cost them generality: against random hiders they win only 84% (v3.2: 99%), against
   the fleeing bot 53% (v3.2: 76%). Some teamwork appeared: while one seeker sees the hider the other walks +0.33 cells
   closer per step (v3.2: +0.06). Dead zones remain, now because the hider is predictable, not because of memory.
+- **v3.5 (`runs/v3.5_both_three_sites_2v1_20261021_220610`): hiders vary their side now, but are loud again.**
+  Side the hider mostly stays on per round (200 self-play rounds): v3.4 left / A 90%, middle 10%, right / C 0%;
+  v3.5 left / A 12% (hiders win 88% there), middle / B 24% (win 17%), right / C 64% (win 1%). So they mix, but mostly
+  pick the side the seekers now cover. Without the noise cost they are in run mode 59% of hunting steps (v3.4: 0%) and
+  seekers heard them without seeing them in 3,131 steps (v3.4: 0); forced to walk, the seekers' win rate drops 90% ->
+  79%. When a hider hears a seeker it now runs 62% of the time; the seeker still closes in, but slower (-0.24 per step,
+  v3.4: -0.53). Seekers became much more general: 89% against the fleeing bot (v3.4: 53%, chaser bots 91%), 96%
+  against random hiders; they run 93% of the time, 92% of moves forward, cover C, mid and the top corridor, and now
+  leave site A thin. No teamwork yet (other seeker +0.02 cells closer per step while its mate sees the hider).
+  Hider entropy rose during training (1.5 -> 2.6): less decisive, more varied.
 - **Seeker problems Moeez spotted (v3, measured):** sloppy lock-on (they turn towards a seen hider 87% of the time but
   pick the centring turn only 39%; the hider drifts from 19 to 30 degrees off-centre per step and is lost 26% of the
   time) and no teamwork (while one seeker sees the hider, the other walks 0.07 cells closer per step, less than its

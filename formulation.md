@@ -368,3 +368,8 @@ Several changes in one run, at Moeez's request; the behaviour measurements separ
   but they all go to site A. Seekers learned that within about 400k steps, go straight to A, and win 97% of self-play;
   they never search site C or the lanes, and became worse against hiders that go elsewhere (84% against random hiders,
   v3.2: 99%; 53% against the fleeing bot, v3.2: 76%).
+- **2v1, three_sites, v3.5 (both learning from v3.4, hider memory, no noise cost, win / loss 20, 5M steps):** hiders now vary
+  their side (per round: A 12%, B 24%, C 64%; v3.4 was A 90%), but mostly pick C, where the seekers catch them 99% of the
+  time, while at A they win 88%. Without the noise cost they run again (run mode 59% of hunting steps) and are heard
+  through walls; forced to walk, seekers win 79% instead of 90%. Seekers became far more general (89% against the
+  fleeing bot, v3.4: 53%) and win 84% of self-play. The chaser bot catches trained hiders 94% (v3.4: 67%).

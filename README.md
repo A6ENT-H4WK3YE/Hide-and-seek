@@ -22,7 +22,7 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | v3.2 | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | done (seekers dominate) |
 | v3.3 | hiders pay a small cost for making noise, and are retrained alone against the frozen v3.2 seekers | done (the new hiders beat the old seekers) |
 | v3.4 | the team's "searched recently" memory lasts a minute instead of 10 seconds; both teams learn again from their trained networks | done: hiders silent but always at site A, seekers win 97% |
-| **v3.5** | hiders get a learned memory; no noise cost; bigger win / loss reward | **current**, training |
+| **v3.5** | hiders get a learned memory; no noise cost; bigger win / loss reward | **current**: hiders vary their side but run again; seekers win 84% |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -39,6 +39,7 @@ Seekers' win rate over 300 games per matchup, 2 seekers v 1 hider. "Chaser" and 
 | v3.1, big map (stopped at 3.4M steps) | 84% | 41% (chaser 80%) | **87%** (random hider 96%) | 31% |
 | v3.2, big map | 99% | 76% (chaser 91%) | 99% (random hider 100%) | 98% |
 | v3.4, big map | 84% | 53% (chaser 91%) | **67%** (random hider 100%) | 97% |
+| v3.5, big map | 96% | **89%** (chaser 91%) | 94% (random hider 100%) | 84% |
 
 Bot strength changes between versions (from v3 the bots also hear), so compare each trained number with the bot numbers in the same row.
 
