@@ -34,7 +34,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import config as cfg
-from env import HideSeekEnv
+from env import HideSeekEnv, load_map
 from workers import ParallelGames
 from model import TeamNet, get_device, OBS_KEYS, ACTION_PARTS, obs_to_tensors
 from render import draw_frame, save_gif
@@ -84,7 +84,7 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_SEEKERS} seekers v {cfg.N_HIDERS} hiders\n")
     f.write(f"- observation: rays ({cfg.N_RAYS}, 4) + enemies ({cfg.MAX_TEAM_SIZE}, 4) + heard ({cfg.MAX_TEAM_SIZE}, 4) + vec (7,) + minimap, "
             f"actions: move {cfg.N_MOVES} x turn {cfg.N_TURNS} {cfg.TURN_ANGLES} x keep/switch walk-run mode, "
-            f"walk speed x{cfg.WALK_SPEED_FACTOR}, hearing range {cfg.HEARING_RANGE}\n")
+            f"walk speed x{cfg.WALK_SPEED_FACTOR}, hearing range {cfg.HEARING_FRACTION} x map size = {cfg.HEARING_FRACTION * max(load_map(cfg.MAP_FILE)[1].shape):.2f} (through walls)\n")
     f.write(f"- rewards (seekers; hiders get minus): seen {cfg.REWARD_SEEN:+} x closeness, unseen {cfg.REWARD_UNSEEN:+}, "
             f"per catch {cfg.REWARD_CATCH:+}, win {cfg.REWARD_WIN:+} plus up to {cfg.REWARD_TIME_BONUS:+} for time left, "
             f"loss {cfg.REWARD_LOSS:+}\n")

@@ -7,7 +7,8 @@ points to a section here, and every training run's `run_card.md` records it.
 
 ## v3: walk or run, with footsteps you can hear
 
-The current version is v3.1: the same, except walk / run is a mode you switch (see the v3.1 changelog). Everything in v2.1 (below) stays, plus sound. Default map is now `three_sites.txt`
+The current version is v3.2: walk / run is a mode you switch (v3.1), and sound goes through walls with a range that
+scales with the map (v3.2). See the changelog; the hearing rule below is the original v3 one. Everything in v2.1 (below) stays, plus sound. Default map is now `three_sites.txt`
 (250-step rounds, 30-step hiding phase).
 
 ### Actions
@@ -248,6 +249,20 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   last ~400k steps, so after the seekers got good every frozen seeker the hiders met was already strong.
 - **Bots:** they switch whenever their mode is not the one they want (chaser always runs, fleeing hider walks while
   waiting and runs while fleeing). Reference numbers on three_sites 2v1: chaser v random hider 97%, chaser v fleeing bot 78%.
+
+### v3.2: sound goes through walls, range scaled to the map
+- **What changed:** only hearing. A running enemy is heard if the **straight-line** distance is at most
+  `HEARING_FRACTION` (0.25) x the map's longer side: 11.25 on three_sites (45 x 31), 2.75 on tiny (11 x 11).
+  Walls do not block sound. The "heard" observation now gives the straight-line distance. Everything else is v3.1.
+- **Why (Moeez):** with 6 cells of walking distance, sound almost never reached anyone on the big map. A hider waiting
+  at its spawn only heard a seeker once it was in site B (6 away); a seeker running in site A or C is about 10 away in a
+  straight line but 15 to walk, so it was never heard. Hiders had no idea where seekers were, and seekers could not
+  hear hiders either. Now a seeker running at the map centre or in A / C is heard from the hider spawn.
+- **Bots:** unchanged code, but they hear much further: on three_sites 2v1 the chaser now catches a random hider 100%
+  and the fleeing bot 88% (v3.1: 97% and 78%), because the fleeing bot runs when it flees.
+- **Run before this change:** the v3.1 run was stopped at 3.4M of 5M steps (`runs/v3.1_three_sites_2v1_20261021_161950`);
+  seekers were winning only about 30% of self-play games by then (v3: 85%), so the walk toggle and the longer pool
+  probably helped hiders. Not evaluated yet.
 
 ### Not game changes (training only, recorded in each run card instead)
 - Opponent pool: some training games are played against frozen past versions of the other team.

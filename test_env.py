@@ -9,7 +9,7 @@ import numpy as np
 import config as cfg
 from env import (HideSeekEnv, NO_TURN, HIT_WALL, HIT_TEAMMATE, HIT_ENEMY, N_MINIMAP_CHANNELS,
                  RAY_FEATURES, ENEMY_FEATURES, VEC_DIM, MM_ME, MM_SEARCHED)
-from geometry import overlaps_wall
+from geometry import overlaps_wall, line_clear
 
 TEST_MAP = """\
 ###########
@@ -30,7 +30,7 @@ CORNER_MAP = """\
 #####
 """
 
-# SOUND_MAP: a wall down the middle of the top part, so two cells can be close in a straight line but far to walk
+# SOUND_MAP: a wall down the middle of the top part, so two agents can be close in a straight line but far to walk
 SOUND_MAP = """\
 ###########
 #h...#...s#
@@ -40,7 +40,8 @@ SOUND_MAP = """\
 #.........#
 ###########
 """
-# (1, 4) and (1, 6) are 2 apart in a straight line, but 10 steps apart walking round the wall via row 5
+# (1, 4) and (1, 6) are 2 apart in a straight line, but 10 steps apart walking round the wall via row 5;
+# sound goes through the wall, so only the straight line counts
 
 # actions are (move, turn, switch): switch 1 flips the walk / run mode, 0 keeps it.
 # place() below puts agents in run mode unless told otherwise (most checks are about full-speed moves).
@@ -278,14 +279,27 @@ check("minimap marks my own position", o["minimap"][MM_ME].sum() > 0)
 # ======================================================================
 # sound
 # ======================================================================
+big = HideSeekEnv("maps/three_sites.txt")
+big.reset(seed=0, n_seekers=1, n_hiders=1)
+check(f"hearing range scales with the map: {big.hearing_range:.2f} on three_sites (45 x 31), "
+      f"{tiny.hearing_range:.2f} on tiny (11 x 11)",
+      close(big.hearing_range, cfg.HEARING_FRACTION * 45) and close(tiny.hearing_range, cfg.HEARING_FRACTION * 11))
+# a seeker running in site A is heard by a hider at the edge of its spawn, through the walls in between
+place(big, seekers=[(8.5, 9.5, 0)], hiders=[(17.5, 4.5, 270)], t=HUNT)
+big.step([FORWARD], [STAY])
+walls_between = not line_clear(big.walls, big.seekers[0, 0], big.seekers[0, 1], big.hiders[0, 0], big.hiders[0, 1])
+check(f"on three_sites, a hider at its spawn hears a seeker running in site A ({big.sound_dist[0, 0]:.1f} away, "
+      f"walls in between)", big.hider_hears[0, 0] and walls_between)
+
 snd = make_env(SOUND_MAP)
+snd.hearing_range = 6.0     # the sound checks below use a fixed range of 6 on this small map
 # seeker at the bottom right looking east (away), so it can only hear, not see
 place(snd, seekers=[(7.5, 5.5, 0)], hiders=[(4.5, 5.5, 180)], t=HUNT)
-obs, _, _, _ = snd.step([STAY], [FORWARD])     # hider runs west, ends 4 steps' walk from the seeker
+obs, _, _, _ = snd.step([STAY], [FORWARD])     # hider runs west, ends 4 away from the seeker
 check(f"a running hider makes noise", snd.hider_noisy[0])
-check(f"the seeker hears it (walking distance {snd.sound_dist[0, 0]:.0f}, range {cfg.HEARING_RANGE})",
+check(f"the seeker hears it ({snd.sound_dist[0, 0]:.0f} away, range {snd.hearing_range:.0f})",
       snd.seeker_hears[0, 0] and not snd.seeker_sees[0, 0])
-check(f"heard slot: behind the seeker, walking distance 4: {np.round(obs['seekers'][0]['heard'][0], 3)}",
+check(f"heard slot: behind the seeker, 4 away: {np.round(obs['seekers'][0]['heard'][0], 3)}",
       np.allclose(obs["seekers"][0]["heard"][0], [1, -1, 0, 4 / cfg.RAY_NORM], atol=1e-5))
 check("a heard enemy is marked in the seeker's memory", snd.seeker_memory[0, 5, 3] == 1.0)
 
@@ -299,8 +313,14 @@ snd.step([STAY], [STAY])
 check("running on the spot (not moving) makes no noise", not snd.hider_noisy[0])
 
 place(snd, seekers=[(6.5, 1.5, 0)], hiders=[(4.5, 1.5, 90)], t=HUNT)
-snd.step([STAY], [FORWARD])                    # 2 apart in a straight line, but the wall is between them
-check(f"sound does not go through walls: 2 apart in a straight line, {snd.sound_dist[0, 0]:.0f} to walk, not heard",
+snd.step([STAY], [FORWARD])                    # close in a straight line, but the wall is between them (10 to walk)
+check(f"sound goes through walls: {snd.sound_dist[0, 0]:.2f} away in a straight line, wall in between, heard but not seen",
+      snd.hider_noisy[0] and snd.seeker_hears[0, 0] and not snd.seeker_sees[0, 0]
+      and close(snd.sound_dist[0, 0], np.hypot(2, 1)))
+
+place(snd, seekers=[(1.5, 5.5, 0)], hiders=[(9.5, 5.5, 180)], t=HUNT)
+snd.step([STAY], [FORWARD])                    # hider runs west, ends 7 away
+check(f"too far ({snd.sound_dist[0, 0]:.0f} away, range {snd.hearing_range:.0f}): not heard",
       snd.hider_noisy[0] and not snd.seeker_hears[0, 0])
 
 place(snd, seekers=[(4.5, 5.5, 180)], hiders=[(7.5, 5.5, 0)], t=HUNT)

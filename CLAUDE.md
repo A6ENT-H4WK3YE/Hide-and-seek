@@ -4,29 +4,25 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-21, end of session)
+## Where we left off (2026-10-21, afternoon)
 
-- Branch `main` (pushed, now holds all the continuous work), tag `v3.1` (pushed). Game version **v3.1**, map `three_sites.txt`, 2 seekers v 1 hider,
-  5M steps per run, 16 game workers.
-- **New since then: ray casting is compiled with numba** (game steps 4x faster, results bit-for-bit identical).
-  Installed on the Mac 2026-10-21 (numba 0.60.0, Python 3.9): identical to the numpy version on 100,000 rays
-  (exact-corner rays included), game step 1.19 -> 0.40 ms, training about 1,730 steps/s. The learning step (PPO update,
-  about 0.7 s of each 1.1 s update) is now the biggest cost, not the game.
-- The v3.1 training run was **stopped by Moeez at 539k of 5M steps** (`runs/v3.1_three_sites_2v1_20261021_032009`).
-  `train.py` cannot resume, so **next session: start it again** with `caffeinate -i python train.py` (about 45 minutes
-  before numba).
-  Ignore the partial folder `runs/v3.1_three_sites_2v1_20261021_030037` (stopped at 490k, before the workers).
-- After the run: the same analysis as for v3, then compare. Scripts used for v3 lived in the scratchpad, so rebuild them
-  (or add an `analyse.py` to the repo, which Moeez was offered and has not decided on):
-  `evaluate.py` (300 games per matchup), how often each team runs, what hiders do when they hear a seeker,
-  the forced-walk test (trained hiders forced to walk, against trained seekers), heatmaps of where everyone goes.
-- Queued after that, one change each, in this order:
-  1. **Team spotting (v3.2):** enemies a teammate sees or hears show up in my slots (flagged as a teammate's info),
-     and the "last seen enemy" memory becomes team-shared.
-  2. **Aim reward + anti-farming fix (v3.3):** the "in sight" reward also grows with how centred the hider is, and the
-     per-step reward is rescaled so watching a hider for a whole 250-step round clearly pays less than catching it.
-  3. Optional: run the bot benchmarks in the workers too (about 10 minutes of each 5M run).
-  4. Possibly no longer needed: back and strafe slower than forward (the backpedalling quirk went away on its own in v3).
+- Branch `main`, game version **v3.2**, map `three_sites.txt`, 2 seekers v 1 hider, 5M steps per run, 16 game workers,
+  ray casting compiled with numba (installed on the Mac: numba 0.60.0; game step 1.19 -> 0.40 ms, identical results).
+  Training is about 1,730 steps/s on the Mac; the learning step (PPO update, about 0.7 s of each 1.1 s update) is now
+  the biggest cost, not the game.
+- **v3.2 training run started** (sound through walls, range a quarter of the map's longer side = 11.25 on three_sites).
+- The v3.1 run was stopped at 3.4M of 5M steps (`runs/v3.1_three_sites_2v1_20261021_161950`, checkpoint saved) when
+  Moeez spotted that sound could not go through walls. Seekers were winning only about 30% of self-play by then
+  (v3: 85%). Not evaluated yet; it can still be evaluated as a partial v3.1 result.
+- After the v3.2 run: the same analysis as for v3 (evaluate.py with 300 games per matchup, how often each team runs,
+  what hiders do when they hear a seeker, the forced-walk test, heatmaps), then compare with v3 (and the partial v3.1).
+  Those analysis scripts lived in the scratchpad; rebuild them or add an `analyse.py` (offered, not decided).
+- Queued, one change each, in this order:
+  1. **v3.3: double the win / loss reward** (10 -> 20) so the round result counts for more (a hider's win only comes at
+     step 250, heavily discounted). Also fixes the anti-farming margin (watching a whole round about +20 v catching about +40).
+  2. **Team spotting:** enemies a teammate sees or hears show up in my slots, and the "last seen enemy" memory is shared.
+  3. **Aim reward:** the "in sight" reward also grows with how centred the hider is.
+  4. Optional: bot benchmarks in the workers; maybe a faster learning step.
 
 ## Who you are working with
 
@@ -87,7 +83,7 @@ agents playing in a 3D world. The goal can grow later.
 Roadmap (status):
 1. v1: grid world, 360 degree vision. **Done** (tag `v1-grid`).
 2. v2: continuous space, 90 degree vision cone, catch by distance and facing. **Done.**
-3. v3: walk vs run with sound. **Built; v3.1 is current, its training run still to do.**
+3. v3: walk vs run with sound. **Built; v3.2 (sound through walls) is current and training.**
 4. Bigger map and bigger teams. **Big map done** (`three_sites.txt` is the default since v2.1); bigger teams not yet.
 5. Team spotting and aim (next), then continuous turning, learned memory (GRU), communication between teammates.
 6. Continuous time (positions follow differential equations).
@@ -126,7 +122,7 @@ caffeinate -i python train.py        # full run (TOTAL_STEPS in config)
 python evaluate.py runs/<run>/checkpoints/latest.pt 300
 ```
 
-## The game now (v3.1, details in formulation.md)
+## The game now (v3.2, details in formulation.md)
 
 - Continuous 2D space. Every `#` of the map is a solid 1 x 1 square. Agents are circles (radius 0.3) with a position
   and a heading; they slide along walls and can overlap each other. 1 unit = 1 cell, 1 step = about 1 second.
@@ -135,7 +131,8 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
   Every round starts walking.
 - Vision: 90 degree cone, no range limit, walls block it; enemies checked exactly (straight line between centres);
   31 rays describe the layout. Sight is one-way (you can see someone's back).
-- Hearing: an enemy that runs within 6 cells of walking distance is heard (round corners, not through walls).
+- Hearing: an enemy that runs is heard within 0.25 x the map's longer side (11.25 cells on three_sites), straight line,
+  through walls (v3.2; v3 and v3.1 used 6 cells of walking distance, which walls blocked).
 - Catch: in sight, centres within 0.8, hider within 30 degrees of where the seeker looks.
 - Rewards (seekers; hiders get exactly minus): +0.2 x closeness per step a hider is in sight, -0.05 per step none is,
   +10 per catch, +10 plus up to +10 for time left when all are caught, -10 if hiders survive.
@@ -159,6 +156,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | v3.1 | walk / run becomes a mode you switch, starting in walk; opponent pool spans the whole run (together, at Moeez's request) | hiders never learned to stay quiet |
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
+| v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
 
 Decisions behind v2 (agreed 2026-10-20): fixed set of 9 turns (continuous turning is a later experiment); catch 0.8 and
 30 degrees and in sight; radius 0.3, speed 1 for every direction; agents pass through each other; turn then move;
@@ -167,7 +165,8 @@ one-way sight accepted as FPS-like.
 Decisions behind v3 (2026-10-21): no reward for "seeing a seeker and running away" (could be exploited); walk at 0.5
 (like CS; 0.75 would make walking nearly free); hearing range 6 cells of walking distance (3 x 3 or 4 x 4 would only
 let you hear a seeker already in catch range); only enemies' footsteps are reported; heard enemies go into memory;
-bots hear too.
+bots hear too. Revised in v3.2 (2026-10-21, Moeez): sound must go through walls, and the range must
+reach from the middle of the map to the hider spawn, scaling with map size; chose a quarter of the longer side.
 
 ## Results so far (seekers' win rate, 300 games per matchup unless noted)
 
@@ -177,7 +176,8 @@ bots hear too.
 | v2.1 | tiny, 2M | 96% | 67% (chaser 79%) | 91% (random hider 88%) | 86% |
 | v2.1 | big, 5M | 77% (random seekers 1%, chaser 70%) | 37% (chaser 51%) | **54%** (random hider 70%, fleeing bot 51%) | 37% |
 | v3 | big, 5M | 71% (chaser 96%) | **74%** (chaser 80%) | 94% (random hider 96%, fleeing bot 80%) | 85% |
-| v3.1 | big, 5M | not run yet (stopped at 539k) | | | |
+| v3.1 | big, 3.4M (stopped) | not evaluated yet; self-play was about 30% when stopped | | | |
+| v3.2 | big, 5M | training | | | |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 

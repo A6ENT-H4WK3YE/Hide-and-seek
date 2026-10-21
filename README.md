@@ -17,8 +17,9 @@ Recreate as much of an FPS game (CS / Valorant style) as possible, train agents 
 | v2 | continuous space, 90 degree vision cone, rays, exact line of sight, catch by distance and facing, rewards that cannot be farmed | done |
 | v2.1 | stronger reward for keeping a hider in sight (seekers had learned to spin) | done |
 | big map | training on `three_sites.txt` (3 sites, mid, lanes), 250-step rounds | done, now the default |
-| v3 | walk (half speed, silent) or run (full speed, heard by enemies within 6 cells of walking distance) | done |
-| **v3.1** | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | **current** (branch `main`, tag `v3.1`), training run to do |
+| v3 | walk (half speed, silent) or run (full speed, heard by nearby enemies) | done |
+| v3.1 | walk / run as a mode you switch, starting in walk; opponent pool spanning the whole run; games run in parallel on all CPU cores | done (tag `v3.1`; run stopped at 3.4M steps) |
+| **v3.2** | sound goes through walls, and its range scales with the map (about 11 cells on the big map) | **current**, training |
 
 Next: team spotting (teammates share what they see and hear), an aim reward (keep the target centred), then continuous turning, learned memory (GRU), communication, continuous time, and a 3D render.
 
@@ -75,11 +76,11 @@ Check and preview any map (also confirms every walkable cell is reachable):
 python preview_map.py maps/three_sites.txt
 ```
 
-## Rules (v3.1)
+## Rules (v3.2)
 
 - **Map:** loaded from a map file; every `#` is a solid 1 x 1 square. Agents are circles (radius 0.3) with a real position and a heading, and slide along walls.
 - **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90, -30, -10, -3, 0, +3, +10, +30, +90 degrees) and whether to switch between walking and running (the mode stays until switched; every round starts walking).
-- **Sound:** running is full speed (1 unit per step) but enemies within 6 cells of walking distance hear you; walking is half speed and silent. Sound goes round corners, not through walls.
+- **Sound:** running is full speed (1 unit per step) but enemies hear you within a quarter of the map's size (about 11 cells on the big map), even through walls; walking is half speed and silent.
 - **Teams:** 2 seekers v 1 hider for now (variable sizes later).
 - **Hiding phase:** seekers are frozen for the first 30 steps (15 on the tiny map) so hiders can get into position.
 - **Vision:** a 90 degree cone, no range limit, blocked by walls. Enemies are checked exactly (straight line between centres). A seeker can see a hider's back without being seen.

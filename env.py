@@ -17,7 +17,7 @@
 #   "enemies": (MAX_TEAM_SIZE, 4)     enemies I can see right now, nearest first (empty slots are all 0):
 #                                     seen flag, direction relative to where I look (cos, sin), distance
 #   "heard":   (MAX_TEAM_SIZE, 4)     enemies I can hear running right now, nearest first, same layout
-#                                     (distance here is the walking distance the sound travelled)
+#                                     (sound goes through walls, so this is the straight-line distance)
 #   "vec":     (7,)                   my position, my heading (cos, sin), time, hiding phase, am I running
 #   "minimap": (N_MINIMAP_CHANNELS, MINIMAP_SIZE, MINIMAP_SIZE)   the whole map, shrunk
 # rewards is a dict {"seekers": array, "hiders": array}, one number per agent.
@@ -83,7 +83,7 @@ def pool_matrix(n, m):
 
 def walk_distances(walls):
     # shortest walking distance (in 4-way steps between cells) from every floor cell to every cell,
-    # worked out once per map: {(row, col): (H, W) array}. Used for hearing and by the bots.
+    # worked out once per map: {(row, col): (H, W) array}. Used by the bots to plan routes.
     H, W = walls.shape
     out = {}
     for src in [(y, x) for y in range(H) for x in range(W) if not walls[y, x]]:
@@ -115,6 +115,8 @@ class HideSeekEnv:
         # distances along a ray where we check which cell it passes over (long enough for the whole map)
         self.ray_samples = np.arange(0.0, np.hypot(self.H, self.W), RAY_SAMPLE)
         self.path_dist = walk_distances(self.walls)
+        # running is heard within this straight-line distance, scaled to the map (bigger map, further sound)
+        self.hearing_range = cfg.HEARING_FRACTION * max(self.H, self.W)
 
         # minimap: averaging matrices (minimap = Ry @ full_map @ Rx), and which minimap
         # cells each map row / column belongs to (for marking single points like agents)
@@ -328,15 +330,15 @@ class HideSeekEnv:
         self.view[who[keep], rows[keep], cols[keep]] = True
 
     def _update_hearing(self):
-        # seeker_hears[i, j]: seeker i hears hider j running, within HEARING_RANGE walking distance (and the other way round)
+        # seeker_hears[i, j]: seeker i hears hider j running (and the other way round).
+        # Sound goes through walls: only the straight-line distance counts, up to hearing_range.
         self.seeker_hears = np.zeros((self.n_seekers, self.n_hiders), dtype=bool)
         self.hider_hears = np.zeros((self.n_hiders, self.n_seekers), dtype=bool)
-        self.sound_dist = np.zeros((self.n_seekers, self.n_hiders))     # walking distance between each pair
+        self.sound_dist = np.zeros((self.n_seekers, self.n_hiders))     # straight-line distance between each pair
         for i in range(self.n_seekers):
-            d = self.path_dist[cell_of(self.seekers[i])]
             for j in range(self.n_hiders):
-                self.sound_dist[i, j] = d[cell_of(self.hiders[j])]
-                close = self.sound_dist[i, j] <= cfg.HEARING_RANGE
+                self.sound_dist[i, j] = np.hypot(*(self.hiders[j] - self.seekers[i]))
+                close = self.sound_dist[i, j] <= self.hearing_range
                 self.seeker_hears[i, j] = close and self.hider_noisy[j] and self.hider_alive[j]
                 self.hider_hears[j, i] = close and self.seeker_noisy[i] and self.hider_alive[j]
 

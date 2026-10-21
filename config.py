@@ -3,7 +3,7 @@
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3.1"
+GAME_VERSION = "v3.2"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
@@ -42,8 +42,9 @@ CATCH_ANGLE = 30        # ...the hider is within this many degrees of where the 
 MEMORY_DECAY = 0.9      # how fast each agent's own "last seen enemy" memory fades each step
 
 # ---------- sound ----------
-HEARING_RANGE = 6.0     # an enemy running (and moving) is heard within this walking distance (map cells):
-                        # sound goes round corners but not through walls
+HEARING_FRACTION = 0.25 # an enemy running (and moving) is heard within this straight-line distance, as a fraction of
+                        # the map's longer side: about 11 cells on three_sites (45 x 31), about 3 on tiny (11 x 11).
+                        # Sound goes through walls (v3 / v3.1 used 6 cells of walking distance, which walls blocked)
 
 # ---------- team search memory and minimap ----------
 SEARCH_MEMORY_STEPS = 10  # shared "searched recently" marks fade to 0 over this many steps
