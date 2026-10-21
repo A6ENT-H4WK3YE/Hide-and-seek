@@ -9,8 +9,9 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 - Branch `main` (pushed, now holds all the continuous work), tag `v3.1` (pushed). Game version **v3.1**, map `three_sites.txt`, 2 seekers v 1 hider,
   5M steps per run, 16 game workers.
 - **New since then: ray casting is compiled with numba** (game steps 4x faster, results bit-for-bit identical).
-  On the Mac, first run `pip install numba` in `.venv`, then `python test_env.py` and a smoke run, and note the new
-  steps/s here (without numba the game still runs, just at the old speed).
+  Installed on the Mac 2026-10-21 (numba 0.60.0, Python 3.9): identical to the numpy version on 100,000 rays
+  (exact-corner rays included), game step 1.19 -> 0.40 ms, training about 1,730 steps/s. The learning step (PPO update,
+  about 0.7 s of each 1.1 s update) is now the biggest cost, not the game.
 - The v3.1 training run was **stopped by Moeez at 539k of 5M steps** (`runs/v3.1_three_sites_2v1_20261021_032009`).
   `train.py` cannot resume, so **next session: start it again** with `caffeinate -i python train.py` (about 45 minutes
   before numba).
