@@ -9,8 +9,8 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 - Branch `main`, game version **v3.4**, map `three_sites.txt`, 2 seekers v 1 hider, 16 game workers, numba ray casting.
   v3.4 = v3.3 (hiders pay 0.02 per noisy step, switch starts at 95% "keep") + the team "searched recently" memory lasts
   60 steps instead of 10 (observation only, no reward change).
-- **Run started: both teams learn**, seekers from the final v3.2 network, hiders from the v3.3 network
-  (`START_FROM`), 5M steps, run name `v3.4_both_*`.
+- **v3.4 run done and analysed** (`runs/v3.4_both_three_sites_2v1_20261021_193635`): hiders silent but always go to
+  site A; seekers learned it and win 97 to 99%. Next decision with Moeez: how to get hiders to vary their site.
 - Earlier tonight: hiders-only v3.3 (frozen v3.2 seekers) stopped at 1.85M (`runs/v3.3_three_sites_2v1_20261021_185327`):
   seekers won only 1.5% against the new hiders. Then both teams learning (`runs/v3.3_both_*`) stopped at 213k steps
   (seekers recovering, 2% -> 10%) to add the longer memory.
@@ -183,7 +183,7 @@ reach from the middle of the map to the hider spawn, scaling with map size; chos
 | v3.2 | big, 5M | 99% (chaser 100%) | 76% (chaser 91%) | 99% (random hider 100%, fleeing bot 88%) | 98% |
 | v3.3 | big, hiders only v frozen v3.2 seekers, stopped at 1.85M | (seekers frozen) | (seekers frozen) | not evaluated | 1.5% v the final v3.2 seekers |
 | v3.3 both | big, both learning, seekers from v3.2, hiders from v3.3, stopped at 213k | not evaluated | | | 2% -> 10% |
-| v3.4 both | big, 5M, same starting points, team memory 60 steps | training | | | |
+| v3.4 both | big, 5M, seekers from v3.2, hiders from v3.3, team memory 60 steps | 84% (chaser 100%) | 53% (chaser 91%) | **67%** (random hider 100%, fleeing bot 91%) | 97% |
 
 Bot numbers change with each version (in v3 the bots also hear), so compare trained teams with the bot line of the same row.
 
@@ -216,6 +216,14 @@ What the agents did (measured, not just watched):
   closes in (-0.3 units per step). Forced-walk test: 99% -> 89%. Hiders spend the hunt in corridors (57%), site C (27%),
   never site A. Still no teamwork: while one seeker sees the hider, the other walks +0.06 cells closer per step
   (when nobody sees it, +0.36).
+- **v3.4 both teams learning (`runs/v3.4_both_three_sites_2v1_20261021_193635`):** hiders are completely silent (walk
+  100% of the time, never heard) and the best hiders so far against the chaser bot (67% caught; random 100%, fleeing bot
+  91%). But every hider goes to **site A** along the top corridor (38% of the hunt on A, 48% in nearby corridors, 0% on
+  B and C), and the seekers learned it within about 400k steps: they run up the middle straight to A (forward 89% of
+  moves, keep a seen hider in view 92%), travel as a pair (median 5 units apart) and never search C or the lanes. Self-play
+  97 to 99% for seekers. Specialising cost them generality: against random hiders they win only 84% (v3.2: 99%), against
+  the fleeing bot 53% (v3.2: 76%). Some teamwork appeared: while one seeker sees the hider the other walks +0.33 cells
+  closer per step (v3.2: +0.06). Dead zones remain, now because the hider is predictable, not because of memory.
 - **Seeker problems Moeez spotted (v3, measured):** sloppy lock-on (they turn towards a seen hider 87% of the time but
   pick the centring turn only 39%; the hider drifts from 19 to 30 degrees off-centre per step and is lost 26% of the
   time) and no teamwork (while one seeker sees the hider, the other walks 0.07 cells closer per step, less than its
@@ -243,6 +251,8 @@ What the agents did (measured, not just watched):
   the walk toggle (one decision keeps you quiet, instead of a fresh coin flip every step).
 - **Teams pick a side, and it moves.** Hiders favoured site A in v2.1 and site C in v3; seekers learn where hiders go.
   This is the cycling the opponent pool exists to damp, and why the pool now spans the whole run.
+- **A predictable hider loses, however quiet.** Once hiders were silent they all settled on site A, the seekers read it
+  and won 99%. The best hider play mixes sites at random; PPO self-play tends to collapse onto one plan.
 - **Teamwork needs information.** Shared rewards alone gave no cooperation beyond loosely splitting up; the second
   seeker cannot help with a chase it does not know about (hence team spotting).
 - **Measure behaviour, not just win rates.** Move and turn counts, "walks forward when it sees the hider",

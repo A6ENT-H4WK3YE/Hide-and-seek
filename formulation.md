@@ -343,3 +343,8 @@ From v1.2, a 6th close-up layer and a minimap are added (see changelog).
   their walk / run mode (press switch on 13% of steps); hiders do not (61%), so they make noise about half the time and the
   seekers hear them through walls. The toggle did not do its job for hiders because an untrained network presses switch
   half the time; next idea: start the switch head biased towards "keep".
+- **2v1, three_sites, v3.4 (both learning, seekers from v3.2, hiders from v3.3, 5M steps):** hiders became fully silent
+  (walk 100% of the time) and are the best so far against the chaser bot (67% caught; random hider 100%, fleeing bot 91%),
+  but they all go to site A. Seekers learned that within about 400k steps, go straight to A, and win 97% of self-play;
+  they never search site C or the lanes, and became worse against hiders that go elsewhere (84% against random hiders,
+  v3.2: 99%; 53% against the fleeing bot, v3.2: 76%).
