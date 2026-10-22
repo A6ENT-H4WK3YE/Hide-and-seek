@@ -4,8 +4,8 @@
 # Map legend:
 #   #        wall
 #   .        floor
-#   h        hider spawn cell
-#   s        seeker spawn cell
+#   h        defender spawn cell (top)
+#   s        attacker spawn cell (bottom)
 #   A B C    site cells (walkable, just labelled)
 
 import sys
@@ -36,7 +36,7 @@ while queue:
 print(f"{path}: {W} x {H}, walkable cells {free.sum()}, reachable {len(seen)}")
 if len(seen) != free.sum():
     print("WARNING: some walkable cells cannot be reached")
-print(f"hider spawn cells {(grid == 'h').sum()}, seeker spawn cells {(grid == 's').sum()}")
+print(f"defender spawn cells {(grid == 'h').sum()}, attacker spawn cells {(grid == 's').sum()}")
 
 # ---------- draw ----------
 colours = {

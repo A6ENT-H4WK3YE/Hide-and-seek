@@ -6,24 +6,41 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 
 ## Where we left off (2026-10-22)
 
-- Branch `main`, game version **v3.5** (hider memory, no noise cost, win / loss 20), map `three_sites.txt`, 2v1.
-- **Seekers were not as good as they looked.** A new cheating stress-test hider, the escape bot (`bots.escape_actions`,
-  knows where both seekers are), is caught by the chaser bots 71% of the time but by the v3.5 seekers only 27% (v3.4: 6%).
-  They had learned the trained hiders' habits, not how to search.
-- **Run started (training changes only, Moeez said: optimise the process as you think best):** both teams continue from
-  the v3.5 networks; the escape bot plays the hiders in 25% of games (seekers learn from those, hiders do not:
-  `ESCAPE_BOT_PROB`, run inside the workers); discount 0.99 -> 0.997 so a hider's survival counts at the start of the
-  hunt (10.3 of 20 points instead of 2.2). metrics.csv and the console log the seekers' win rate against the escape bot.
-  Smoke run: seekers' self-play wins fell from 100% to 67% within 60k steps (hiders react to the longer horizon).
-  Run name `v3.5_league_*`, 5M steps.
-- Plan agreed with Moeez: once the seekers beat the escape bot about as well as the chaser bots, freeze them and
-  focus on the hiders.
-- Moeez's questions answered with data: hiders are never heard during the hiding phase (0 of 100 rounds), but in 53% of
-  rounds seekers hear them later (median step 60). Why hiders don't learn plans like "seekers come from mid and top,
-  slip round to the bottom": the 0.99 discount made the end-of-round win nearly worthless early in the round.
-  Not taken: a reward for hiders spotting seekers unnoticed (reward tweaking, and hiders might seek seekers out).
-- Still queued: potential-based exploration shaping for seekers; team spotting; aim reward; sharper minimap.
+- **The project is now v4: a 2v2 attack / defend game (Valorant / CS style)**, not hide and seek. Hide and seek (v1 to
+  v3.5) is kept under the git tag `v3.5-hide-and-seek`. Branch `main`.
+- Moeez asked for a complete, reasoned v4 design in one go ("think it yourself, don't ask me, make the rules and rewards
+  and everything"), starting from his ideas: tags that need two teammates, an operator tagged twice is out, a lone
+  survivor cannot take anyone out, and the end goal of teams going to a site to do an objective while the others defend.
+  The full rules and the reasoning are in formulation.md (v4 section); the design summary is below.
+- **v4 run started: 10M steps, both teams from scratch**, run name `v4_three_sites_2v2_*`. About 1,100 steps/s (about
+  2h45). Smoke run fine (all 59 checks pass).
+- After the run: evaluate.py (trained v random / bots / each other, plants, defuses, takedowns per round), watch GIFs,
+  and measure behaviour: do attackers group up and hit a site together, do defenders stack or spread and rotate on
+  sound, do they trade (two tags inside the window), do retakes happen, who plants where, walk / run use.
+- Ideas kept for later (not built): bigger teams towards 5v5; continuous turning; communication between teammates;
+  aim reward (keep the target centred); sharper minimap; parallel bot benchmarks.
 - **Always start runs with `caffeinate -i`, smoke runs and evaluations too.**
+- A smoke run once stalled for 15 minutes before the first update and could not be reproduced (the rerun was fine).
+  If a run shows no update line within about 3 minutes, check it with `python -u` (unbuffered output).
+
+## v4 design summary (2026-10-22, details and reasons in formulation.md)
+
+- Teams: 2 attackers (spawn bottom, `s`) v 2 defenders (spawn top next to the sites, `h`); one network per team, both
+  with memory (GRU). 250-step rounds, 30-step setup (attackers frozen, no tags).
+- Tag = enemy in sight, within 3 units, within 20 degrees of where you look. Out = tagged by 2 different enemies within
+  8 steps (capped at the enemy team size, so 1v1 works). Lone survivors cannot take anyone out alone.
+- Spike: stand still on a site cell 5 steps to plant; it explodes after 40 steps; defenders defuse by standing still
+  within 1 unit for 7 steps. Round timer stops at the plant; after the plant, a wipe of the attackers does not win, the
+  spike must be defused. Plant-equals-win was tried first: bots v bots gave attackers 78% (race to an empty site);
+  with retakes 64%.
+- Rewards (zero-sum, attackers' side): tag +2, takedown +10, plant +5, win +20; potential-based site shaping for
+  attackers (cannot change the best strategies). No seen / unseen, distance or exploration rewards.
+- Observations: rays; enemies known to the team (seen or heard by anyone, team callouts) with flags; teammates;
+  20 numbers incl. the spike; minimap with sites, team search memory and team enemy memory.
+- Training: PPO, discount 0.997; memory learned in 32-step pieces (checked to replay play exactly); 20% of games one
+  team is played by the bots (`BOT_TEAM_PROB`), half of the rest one team is a past version (pool over the whole run).
+- Bots (`bots.py`): attackers pick one site and go together, fight anything known, plant, guard; defenders hold random
+  sites, go for known attackers together, retake. Bots v bots: attackers 63 to 66%; random attackers never plant.
 
 ## Who you are working with
 
@@ -84,9 +101,9 @@ agents playing in a 3D world. The goal can grow later.
 Roadmap (status):
 1. v1: grid world, 360 degree vision. **Done** (tag `v1-grid`).
 2. v2: continuous space, 90 degree vision cone, catch by distance and facing. **Done.**
-3. v3: walk vs run with sound. **Built; v3.2 (sound through walls) is current; hiders still need to learn to stay quiet.**
-4. Bigger map and bigger teams. **Big map done** (`three_sites.txt` is the default since v2.1); bigger teams not yet.
-5. Team spotting and aim (next), then continuous turning, learned memory (GRU), communication between teammates.
+3. v3: walk vs run with sound, learned memory (GRU). **Done** (hide and seek ends at v3.5, tag `v3.5-hide-and-seek`).
+4. **v4: attack / defend with the spike, two-tag takedowns, team callouts, 2v2. Current, first training run.**
+5. Bigger teams towards 5v5, continuous turning, communication between teammates, aim.
 6. Continuous time (positions follow differential equations).
 7. 3D render (the vision rays can drive a Wolfenstein-style 3D view).
 
@@ -95,7 +112,7 @@ Roadmap (status):
 ```
 config.py       all settings in one place (GAME_VERSION, map, bodies, vision, sound, rewards, training, pool, workers)
 geometry.py     round agents sliding along square walls, ray casting (all rays at once, cell by cell, exact)
-env.py          the game: movement, vision cones, hearing, catches, rewards, observations, memory, minimap
+env.py          the v4 game (GameEnv): movement, vision cones, hearing, tags, the spike, rewards, observations
 render.py       draws frames and GIFs at 3 fps (cones, heading ticks, sight lines; sound: dashed ring = running,
                 dotted circle = how far the footsteps carry, yellow dotted line = who hears whom)
 model.py        TeamNet: one network per team, shared by teammates; three action heads (move, turn, walk/run switch);
@@ -103,11 +120,10 @@ model.py        TeamNet: one network per team, shared by teammates; three action
 train.py        PPO self-play, opponent pool, run card, metrics, GIFs, checkpoints, bot benchmarks
 workers.py      runs the training games in parallel processes (one per CPU core)
 evaluate.py     plays a checkpoint against random players and the bots
-bots.py         scripted chaser seeker, fleeing hider and the cheating escape hider (benchmarks; plan on the grid,
-                steer continuously); the escape bot also plays in training games (ESCAPE_BOT_PROB)
+bots.py         scripted attackers and defenders (benchmarks, and one team in BOT_TEAM_PROB of training games)
 matches.py      plays any mix of trained / bot / random players
-test_env.py     56 rule checks (must say "all checks passed")
-random_demo.py  random agents: one GIF plus baseline win rates and speed
+test_env.py     59 rule checks for v4 (must say "all checks passed")
+random_demo.py  bots or random players: one GIF plus win rates and speed
 preview_map.py  draws a map file to PNG and checks it is fully connected (note: it overwrites the tracked preview PNG)
 formulation.md  the exact game definition per version, changelog and experiment notes
 maps/           tiny.txt (11 x 11, debugging), three_sites.txt (45 x 31, FPS-style, 3 sites)
@@ -115,8 +131,8 @@ runs/           training outputs, ignored by git (run_card.md, metrics.csv, curv
                 and for analysed runs behaviour_heatmaps.png)
 ```
 
-Git: `main` = the latest work (v2 to v3.1 and on). The grid version is kept as tag `v1-grid`; tag `v3.1` marks the end of
-the 2026-10-21 session. Branch `v2-continuous` was the working branch while v2 was built (same history, no longer needed).
+Git: `main` = the latest work (v4). Tags: `v1-grid` (grid hide and seek), `v3.1`, `v3.5-hide-and-seek` (last
+hide-and-seek version). Branch `v2-continuous` is old (no longer needed).
 
 Commands:
 ```
@@ -126,28 +142,12 @@ caffeinate -i python train.py        # full run (TOTAL_STEPS in config)
 python evaluate.py runs/<run>/checkpoints/latest.pt 300
 ```
 
-## The game now (v3.5, details in formulation.md)
+## The game now (v4, details in formulation.md)
 
-- Continuous 2D space. Every `#` of the map is a solid 1 x 1 square. Agents are circles (radius 0.3) with a position
-  and a heading; they slide along walls and can overlap each other. 1 unit = 1 cell, 1 step = about 1 second.
-- Actions each step: move (stay, forward, back, strafe left, strafe right), turn (-90, -30, -10, -3, 0, +3, +10, +30,
-  +90 degrees), and keep / switch the walk-run mode. Run = 1 unit per step and noisy; walk = 0.5 and silent.
-  Every round starts walking.
-- Vision: 90 degree cone, no range limit, walls block it; enemies checked exactly (straight line between centres);
-  31 rays describe the layout. Sight is one-way (you can see someone's back).
-- Hearing: an enemy that runs is heard within 0.25 x the map's longer side (11.25 cells on three_sites), straight line,
-  through walls (v3.2; v3 and v3.1 used 6 cells of walking distance, which walls blocked).
-- Catch: in sight, centres within 0.8, hider within 30 degrees of where the seeker looks.
-- Rewards (seekers; hiders get exactly minus): +0.2 x closeness per step a hider is in sight, -0.05 per step none is,
-  +10 per catch, +20 plus up to +10 for time left when all are caught, -20 if hiders survive (win / loss doubled in
-  v3.5). v3.3 and v3.4 also charged hiders 0.02 per noisy step; removed in v3.5, so it is zero-sum again.
-- Round: 250 steps with a 30-step hiding phase on the big map (100 and 15 on the tiny map). 2 seekers v 1 hider.
-- Each agent observes: rays, enemies in sight, enemies heard, 7 numbers (position, heading, time, hiding phase,
-  running) and a 12 x 12 minimap (walls, me, teammates, team "searched recently" fading over 60 steps since v3.4, own
-  "last seen enemy" memory).
-- Training: PPO, one network per team. Normally both teams learn (self-play), with half the games against frozen past
-  versions from a pool that spans the whole run. `TRAIN_TEAMS` can freeze a team: it then plays with an earlier run's
-  networks (`FROZEN_RUN`), its final network plus its checkpoints as the pool. The walk / run switch starts at 95% "keep".
+See "v4 design summary" above. Movement, vision, sound and the walk / run mode are unchanged from v3.5: circles of
+radius 0.3 sliding along square walls; move, turn (-90 to +90 degrees) and keep / switch walk-run each step; 90 degree
+cone, no range limit, one-way sight; running, planting and defusing heard within 0.25 x the map's longer side (11.25 on
+three_sites) through walls.
 
 ## How we got here: versions, ideas and fixes
 
@@ -164,6 +164,7 @@ python evaluate.py runs/<run>/checkpoints/latest.pt 300
 | (league) | escape bot in 25% of training games; discount 0.99 -> 0.997 (training only) | v3.5 seekers caught the cheating escape bot only 27% (chaser bots 71%); hiders could not feel a win 250 steps away |
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
+| **v4** | new game: 2v2 attack / defend, two-tag takedowns, the spike (plant, explode, defuse), team callouts, memory for both teams, bots as training opponents, memory learned in 32-step pieces | Moeez: the end goal is Valorant-like team play; hide and seek kept hitting the same walls. He asked for a complete design in one go |
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
 | v3.3 | hiders pay 0.02 per noisy step; only hiders learn, against frozen v3.2 seekers (final + 17 checkpoints as pool); switch starts at 95% "keep" (all together, agreed) | v3.2 seekers won 98%; hiders flipped walk / run constantly and were heard through walls. Moeez: fix the hiders first |
 | v3.4 | team "searched recently" memory fades over 60 steps instead of 10 (no reward change); both teams learn from v3.2 seekers / v3.3 hiders | Moeez: seekers leave dead zones and forget where they searched; give them the information rather than an exploration reward |
@@ -179,7 +180,13 @@ let you hear a seeker already in catch range); only enemies' footsteps are repor
 bots hear too. Revised in v3.2 (2026-10-21, Moeez): sound must go through walls, and the range must
 reach from the middle of the map to the hider spawn, scaling with map size; chose a quarter of the longer side.
 
-## Results so far (seekers' win rate, 300 games per matchup unless noted)
+## Results so far
+
+### v4 (attack / defend)
+
+No trained results yet (first run started 2026-10-22).
+
+### Hide and seek, v1 to v3.5 (seekers' win rate, 300 games per matchup unless noted)
 
 | Run | Map, steps | Trained seekers v random hider | Trained seekers v fleeing bot | Chaser bot v trained hiders (lower = better hiders) | Self-play |
 |---|---|---|---|---|---|

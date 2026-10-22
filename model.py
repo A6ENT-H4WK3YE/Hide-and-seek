@@ -1,11 +1,11 @@
 # The neural network each team uses. One network per team, shared by every agent
 # on that team (parameter sharing), so it works for any team size.
 #
-# Input:  what one agent sees, as a dict of tensors (one row per agent)
-#           rays    (N_RAYS, 4)              distance and what each ray hit
-#           enemies (MAX_TEAM_SIZE, 4)       enemies in sight: direction and distance
-#           heard   (MAX_TEAM_SIZE, 4)       enemies heard running: direction and distance
-#           vec     (7,)                     position, heading, time, hiding phase, running
+# Input:  what one player knows, as a dict of tensors (one row per player; see env.py for every number)
+#           rays    (N_RAYS, 4)                    distance and what each ray hit
+#           enemies (MAX_TEAM_SIZE, 9)             enemies my team sees or hears right now
+#           mates   (MAX_TEAM_SIZE - 1, 7)         my teammates
+#           vec     (20,)                          position, heading, time, tags, plant, spike, ...
 #           minimap (N_MINIMAP_CHANNELS, MINIMAP_SIZE, MINIMAP_SIZE)  the whole map, shrunk
 # Output: three sets of action scores, for moving (5), turning (9) and keep / switch walk-run mode (2), and a value
 #         (1 number: "how good is my situation", used to judge whether an action turned out better than expected)
@@ -14,8 +14,8 @@
 # The chance of the triple is the three chances multiplied together,
 # so log-probabilities (and entropies) simply add up.
 #
-# Memory (v3.5, teams in MEMORY_TEAMS): a GRU, a small learned memory carried from one step to the next within a round,
-# so an agent can remember where it has been, what it heard and what plan it chose. Its output is added to the normal
+# Memory (teams in MEMORY_TEAMS, both in v4): a GRU, a small learned memory carried from one step to the next within
+# a round, so a player can remember where it has been, what it heard and what plan it chose. Its output is added to the normal
 # features through a layer that starts at exactly zero, so a network loaded from a run without memory plays exactly
 # as before until it learns to use the memory. The memory is wiped at the start of every round.
 
@@ -23,9 +23,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import config as cfg
-from env import N_MINIMAP_CHANNELS, RAY_FEATURES, ENEMY_FEATURES, VEC_DIM
+from env import N_MINIMAP_CHANNELS, RAY_FEATURES, ENEMY_FEATURES, MATE_FEATURES, VEC_DIM
 
-OBS_KEYS = ["rays", "enemies", "heard", "vec", "minimap"]
+OBS_KEYS = ["rays", "enemies", "mates", "vec", "minimap"]
 ACTION_PARTS = 3     # move, turn, switch walk / run
 
 
@@ -56,8 +56,9 @@ class TeamNet(nn.Module):
             layer_init(nn.Conv2d(N_MINIMAP_CHANNELS, 16, kernel_size=3, padding=1)), nn.ReLU(),
             nn.Flatten(),
         )
-        # everything else is a list of numbers: rays, enemies in sight, enemies heard, position / heading / time
-        flat = cfg.N_RAYS * RAY_FEATURES + 2 * cfg.MAX_TEAM_SIZE * ENEMY_FEATURES + VEC_DIM
+        # everything else is a list of numbers: rays, enemies, teammates, my own numbers
+        flat = (cfg.N_RAYS * RAY_FEATURES + cfg.MAX_TEAM_SIZE * ENEMY_FEATURES
+                + (cfg.MAX_TEAM_SIZE - 1) * MATE_FEATURES + VEC_DIM)
         # combine it all (two layers, since the raw rays need some work to turn into "a doorway on my left")
         self.body = nn.Sequential(
             layer_init(nn.Linear(flat + 16 * m * m, cfg.HIDDEN)), nn.ReLU(),
@@ -86,7 +87,7 @@ class TeamNet(nn.Module):
     def encode(self, obs):
         # everything one agent sees right now -> features (no memory involved)
         n = obs["rays"].shape[0]
-        flat = torch.cat([obs["rays"].reshape(n, -1), obs["enemies"].reshape(n, -1), obs["heard"].reshape(n, -1),
+        flat = torch.cat([obs["rays"].reshape(n, -1), obs["enemies"].reshape(n, -1), obs["mates"].reshape(n, -1),
                           obs["vec"]], dim=1)
         return self.body(torch.cat([flat, self.mini(obs["minimap"])], dim=1))
 

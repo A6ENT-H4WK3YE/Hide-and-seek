@@ -1,63 +1,38 @@
-# Play rounds with completely random agents.
+# Play rounds with random players or the scripted bots.
 #  1. records one round as a GIF so you can watch it
 #  2. plays many rounds without drawing, to get baseline win rates and speed
 #
 # Usage:
-#   python random_demo.py                          (uses MAP_FILE from config)
-#   python random_demo.py maps/three_sites.txt 3 3 (map, seekers, hiders)
+#   python random_demo.py                     bots v bots on the map from config
+#   python random_demo.py random random       (attackers' policy, defenders' policy: "bot" or "random")
 
 import os
 import sys
 import time
 import numpy as np
 import config as cfg
-from env import HideSeekEnv
-from render import draw_frame, save_gif
-from matches import random_actions as random_pairs
+from env import GameEnv
+from bots import Bots
+from matches import play_match
 
-map_file = sys.argv[1] if len(sys.argv) > 1 else cfg.MAP_FILE
-n_seekers = int(sys.argv[2]) if len(sys.argv) > 2 else cfg.N_SEEKERS
-n_hiders = int(sys.argv[3]) if len(sys.argv) > 3 else cfg.N_HIDERS
+a_pol = sys.argv[1] if len(sys.argv) > 1 else "bot"
+d_pol = sys.argv[2] if len(sys.argv) > 2 else "bot"
 n_rounds = 300
 
-t0 = time.time()
-env = HideSeekEnv(map_file)
-print(f"map {map_file} ({env.W} x {env.H}), loaded in {time.time() - t0:.1f}s")
-rng = np.random.default_rng(0)
-
-
-def random_actions(n):
-    return random_pairs(rng, n)
-
-
-# ---------- 1. one recorded round ----------
+env = GameEnv(cfg.MAP_FILE)
+bots = Bots(env)
 os.makedirs(cfg.RUN_DIR, exist_ok=True)
-env.reset(seed=cfg.FIXED_EVAL_SEED, n_seekers=n_seekers, n_hiders=n_hiders)
-frames = [draw_frame(env)]
-done = False
-while not done:
-    _, _, done, info = env.step(random_actions(n_seekers), random_actions(n_hiders))
-    frames.append(draw_frame(env))
-name = os.path.splitext(os.path.basename(map_file))[0]
-gif_path = os.path.join(cfg.RUN_DIR, f"random_{name}_{n_seekers}v{n_hiders}.gif")
-save_gif(frames, gif_path)
-print(f"recorded round: {info['winner']} win after {info['t']} steps -> {gif_path}")
+name = os.path.splitext(os.path.basename(cfg.MAP_FILE))[0]
+gif_path = os.path.join(cfg.RUN_DIR, f"demo_{a_pol}_attackers_v_{d_pol}_defenders_{name}.gif")
+play_match(env, bots, {"attackers": a_pol, "defenders": d_pol}, None, 1, None, seed=cfg.FIXED_EVAL_SEED, gif_path=gif_path)
+print(f"recorded one round -> {gif_path}")
 
-# ---------- 2. many rounds, no drawing ----------
-seeker_wins, total_steps, seen_steps = 0, 0, 0
 t0 = time.time()
-for k in range(n_rounds):
-    env.reset(n_seekers=n_seekers, n_hiders=n_hiders)
-    done = False
-    while not done:
-        _, _, done, info = env.step(random_actions(n_seekers), random_actions(n_hiders))
-        total_steps += 1
-        seen_steps += info["any_seen"]
-    seeker_wins += info["winner"] == "seekers"
+res = play_match(env, bots, {"attackers": a_pol, "defenders": d_pol}, None, n_rounds, None, seed=1)
 elapsed = time.time() - t0
-
-print(f"\n{n_rounds} random rounds ({n_seekers}v{n_hiders}):")
-print(f"  seeker win rate     {seeker_wins / n_rounds:.0%}")
-print(f"  avg round length    {total_steps / n_rounds:.0f} steps")
-print(f"  hiders spotted      {seen_steps / total_steps:.0%} of steps")
-print(f"  speed               {total_steps / elapsed:,.0f} steps per second")
+print(f"\n{n_rounds} rounds, {a_pol} attackers v {d_pol} defenders ({cfg.N_ATTACKERS}v{cfg.N_DEFENDERS}):")
+print(f"  attackers win       {res['attacker_win']:.0%}")
+print(f"  spike planted       {res['planted']:.0%}, defused {res['defused']:.0%}")
+print(f"  players taken out   {res['outs_by_attackers']:.2f} by attackers, {res['outs_by_defenders']:.2f} by defenders per round")
+print(f"  avg round length    {res['length']:.0f} steps")
+print(f"  speed               {n_rounds * res['length'] / elapsed:,.0f} steps per second")

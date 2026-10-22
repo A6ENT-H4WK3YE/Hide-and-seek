@@ -5,6 +5,94 @@ time, the game moves on according to their joint action, and each agent only see
 is going on. This file says exactly which game each version is. `GAME_VERSION` in `config.py`
 points to a section here, and every training run's `run_card.md` records it.
 
+## v4: attack and defend (Valorant / CS style), with tags instead of guns
+
+The current version. A new game built on everything v1 to v3.5 developed (continuous movement, 90 degree vision cones,
+rays, sound through walls, walk / run, learned memory, the opponent pool, parallel training). The hide-and-seek game
+(v1 to v3.5) is kept in git under the tag `v3.5-hide-and-seek`; its sections and results are further down.
+
+**Why a new game (Moeez):** the end goal is an FPS like Valorant: teams going to a site to do an objective while the
+other team defends it. Hide and seek had one side that only runs, which is not that game, and it kept running into the
+same walls: whichever side could not win stopped learning, and the seekers never needed teamwork. Moeez proposed tags
+that need two teammates, and a symmetric 2v2 where a player tagged twice is out and a lone survivor cannot take anyone
+out. He asked for a complete, reasoned design in one go rather than stage by stage; the choices below are Claude's.
+
+### Teams and round
+- **Attackers** (2, spawn at the bottom, `s` cells) and **defenders** (2, spawn at the top next to the sites, `h` cells).
+  Each team has its own network (shared by its players), both with a learned memory (GRU).
+- 250 steps (1 step is about a second). For the first 30 (**setup**) attackers are frozen and nobody can tag, so
+  defenders can take positions (like Valorant's buy phase).
+
+### Movement, vision, sound
+As in v3.5: circles of radius 0.3 sliding along square walls; move (stay, forward, back, strafe left / right), turn
+(-90 to +90 degrees) and keep / switch walk-run mode (walk 0.5 units per step and silent, run 1 and noisy; every round
+starts walking); a 90 degree vision cone with no range limit, blocked by walls, sight one-way. Running, planting and
+defusing make noise, heard by enemies within a quarter of the map's longer side (11.25 cells), through walls.
+
+### Tags and eliminations (the "shot")
+- A **tag** needs the enemy in sight, within **3 units** and within **20 degrees** of where you look: like a short-range
+  shot that needs aim. Each player tags at most one enemy per step (the nearest it can).
+- **One tag only marks a player.** A player is **out** once tagged by **two different enemies within 8 steps**.
+  - Why: taking someone out needs two teammates working together (one keeps a tail and calls it in, the other closes
+    in), which is Moeez's idea, and it rewards crossfires and trading, as in real FPS teamplay.
+  - It also gives his "lone survivor" rule for free: a player whose teammate is out cannot take anyone out alone
+    (unless the teammate's tag is still inside the window: a "trade"), so the right play is to survive or play the
+    objective. In a 1v1 the rule is capped at the enemy team's size, so one tag is enough.
+
+### Objective: the spike
+- An attacker **standing still on a site cell for 5 steps** in a row plants the spike there (moving resets it).
+- Then the round timer stops and the spike counts down **40 steps**: attackers win when it explodes. Defenders win by
+  **defusing**: standing still within 1 unit of the spike for **7 steps** in a row. Everyone knows where a planted spike
+  is and how long is left (as in Valorant).
+- After the plant, taking out every attacker does not win on its own: the spike still has to be defused.
+- Why the spike, not "plant = win": with 3 sites and 2 defenders, an instant win made it a race to the empty site
+  (scripted bots: attackers 78%). Retakes bring it back to a fight (bots: 64%) and are where teamwork matters most.
+
+### Round end
+| How | Winner |
+|---|---|
+| the spike explodes, or every defender is out | attackers |
+| the spike is defused, every attacker is out before the plant, or time runs out before the plant | defenders |
+| both teams out on the same step (before a plant) | draw |
+
+### Rewards (attackers; defenders get exactly minus this, shared by the team)
+| Event | Attackers |
+|---|---|
+| each fresh tag on an enemy (re-tagging inside the window pays nothing) | +2 |
+| each enemy taken out | +10 |
+| spike planted | +5 |
+| round won / lost | +20 / -20 |
+| site shaping (potential-based) | +0.997 x new potential - old potential |
+
+- Only real game events count (tags are like damage dealt, the plant is a milestone).
+- **Site shaping:** the potential is minus the walking distance from the closest attacker to a site, divided by the
+  longest such distance on the map (0 once the spike is down). Walking towards a site pays a little and walking away
+  pays it back, so it cannot be farmed; shaping of this form is proven not to change which strategies are best (also
+  in zero-sum games), it only helps attackers find the sites early in training, when random attackers never plant.
+- No reward for being seen or unseen, for distance, or for exploring: everything else has to come from winning.
+
+### Observations (each player)
+- **rays** (31 x 4): distance, and wall / teammate / enemy
+- **enemies** (5 x 9): every enemy anyone on my team sees or hears right now (**team callouts**), nearest first: direction
+  relative to where I look, distance, I see it, a teammate sees it, only heard, tagged by my team recently (time left in
+  the window), planting
+- **mates** (4 x 7): my teammates: still in, direction, distance, tagged recently, planting, sees an enemy
+- **vec** (20): position, heading, time, setup phase, running, tagged recently, my plant progress, the attackers' best
+  plant progress, on a site, attacker or not, teammates and enemies still in, and the spike: down, time left,
+  direction, distance, defuse progress
+- **minimap** (6 x 12 x 12): walls, sites, me, teammates, where my team searched recently (fading over 60 steps) and where
+  my team last saw or heard enemies (fading over about 30 steps)
+- Slots are sized for teams of up to 5, so the same networks can grow towards 5v5.
+
+### Training
+- PPO, both teams learning from scratch, discount 0.997 (a win at the end still counts about half at the start).
+- Both teams have memory; learning replays it in pieces of 32 steps, each starting from the exact memory it had in play.
+- Opponents: 20% of games one team (picked at random) is played by the **scripted bots** (`bots.py`); of the rest, half
+  have one team played by a **past version** from the opponent pool (spanning the whole run). Only current selves learn.
+- Bots: attackers pick one site and go together, fight anything the team knows about, plant when the site is clear and
+  guard the spike; defenders each hold a random site, go for known attackers together and retake a planted spike.
+  Bots v bots: attackers win about 64%; random players never plant.
+
 ## v3: walk or run, with footsteps you can hear
 
 The current version is v3.2: walk / run is a mode you switch (v3.1), and sound goes through walls with a range that

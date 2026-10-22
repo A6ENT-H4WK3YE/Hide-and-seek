@@ -1,9 +1,12 @@
-# Draw the game as images and save GIFs: walls, vision cones, agents, where they look, and sound:
-# a running agent gets a dashed ring plus a faint dotted circle showing how far its footsteps carry, and a yellow
-# dotted line joins every agent to the enemy footsteps it hears.
+# Draw the game as images and save GIFs: walls, sites, vision cones, players and where they look, tags, the spike,
+# and sound: a running (or planting / defusing) player gets a dashed ring plus a faint dotted circle showing how far
+# the noise carries, and a yellow dotted line joins every player to the enemy noise it hears.
 #
 #   frame = draw_frame(env)            -> RGB numpy array of the current state
-#   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF
+#   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF (3 frames per second)
+#
+# Colours: attackers red, defenders blue. An orange ring = tagged recently (one more tag from a different enemy
+# within the window and that player is out). Grey X = out. The spike is a yellow star.
 
 import numpy as np
 import matplotlib
@@ -12,17 +15,17 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Circle
 from PIL import Image
 import config as cfg
+from env import TEAMS, OTHER
 
 WALL = np.array([43, 47, 58]) / 255
 FLOOR = np.array([217, 212, 199]) / 255
 SITE = np.array([230, 201, 143]) / 255
-SEEKER_SPAWN = np.array([236, 214, 208]) / 255
-HIDER_SPAWN = np.array([210, 220, 228]) / 255
-SEEKER_VIEW = np.array([220, 70, 60]) / 255
-HIDER_VIEW = np.array([60, 120, 220]) / 255
-SEEKER_COL = "#c0392b"
-HIDER_COL = "#2563b0"
-SOUND_COL = "#e0b000"     # footsteps: hearing range circles and "who hears whom" lines
+ATTACKER_SPAWN = np.array([236, 214, 208]) / 255
+DEFENDER_SPAWN = np.array([210, 220, 228]) / 255
+COLOUR = {"attackers": "#c0392b", "defenders": "#2563b0"}
+VIEW = {"attackers": np.array([220, 70, 60]) / 255, "defenders": np.array([60, 120, 220]) / 255}
+SOUND_COL = "#e0b000"     # noise: hearing range circles and "who hears whom" lines
+TAG_COL = "#ff8c00"       # tagged recently
 BG = "#14161c"
 
 
@@ -31,10 +34,9 @@ def base_image(env):
     img = np.zeros((env.H, env.W, 3))
     img[:] = FLOOR
     img[env.grid == "#"] = WALL
-    img[env.grid == "s"] = SEEKER_SPAWN
-    img[env.grid == "h"] = HIDER_SPAWN
-    for site in "ABC":
-        img[env.grid == site] = SITE
+    img[env.grid == "s"] = ATTACKER_SPAWN
+    img[env.grid == "h"] = DEFENDER_SPAWN
+    img[env.sites] = SITE
     return img
 
 
@@ -45,71 +47,74 @@ def draw_frame(env, show_vision=True):
     fig.patch.set_facecolor(BG)
     # map cell (row r, column c) covers x from c to c+1 and y from r to r+1, the same units the game uses
     ax.imshow(img, interpolation="nearest", extent=(0, env.W, env.H, 0))
+    for site in "ABC":
+        cells = np.argwhere(env.grid == site)
+        if len(cells):
+            ax.text(cells[:, 1].mean() + 0.5, cells[:, 0].mean() + 0.5, site, color="#8a6d2b", fontsize=14,
+                    ha="center", va="center", fontweight="bold", alpha=0.6)
 
-    # thin grid lines on small maps so cells are easy to count
-    if env.W <= 15:
-        for k in range(env.W + 1):
-            ax.axvline(k, color=BG, linewidth=0.4)
-        for k in range(env.H + 1):
-            ax.axhline(k, color=BG, linewidth=0.4)
-
-    # vision cones: the agent's position plus the end of every ray (where it hits a wall)
-    ns = env.n_seekers
+    # vision cones: the player's position plus the end of every ray (where it hits a wall)
     if show_vision:
-        for j in range(env.n_hiders):
-            if env.hider_alive[j]:
-                ax.add_patch(Polygon(env.cone_polygon(ns + j), closed=True, facecolor=HIDER_VIEW, alpha=0.22, linewidth=0))
-        for i in range(ns):
-            ax.add_patch(Polygon(env.cone_polygon(i), closed=True, facecolor=SEEKER_VIEW, alpha=0.28, linewidth=0))
+        for team in TEAMS:
+            for i in range(env.n[team]):
+                if env.alive[team][i]:
+                    ax.add_patch(Polygon(env.cone_polygon(env.offset[team] + i), closed=True, facecolor=VIEW[team],
+                                         alpha=0.22, linewidth=0))
 
-    # sound: how far each running agent can be heard, and who hears whom (yellow dotted lines)
-    for positions, noisy in [(env.seekers, env.seeker_noisy), (env.hiders, env.hider_noisy & env.hider_alive)]:
-        for k, p in enumerate(positions):
-            if noisy[k]:
+    # sound: how far each noisy player can be heard, and who hears whom (yellow dotted lines)
+    for team in TEAMS:
+        for i, p in enumerate(env.pos[team]):
+            if env.noisy[team][i] and env.alive[team][i]:
                 ax.add_patch(Circle((p[0], p[1]), env.hearing_range, fill=False, edgecolor=SOUND_COL, linestyle=":",
                                     linewidth=0.8, alpha=0.6, zorder=2))
-    for i in range(ns):
-        for j in range(env.n_hiders):
-            for listener, source, hears in [(env.seekers[i], env.hiders[j], env.seeker_hears[i, j]),
-                                            (env.hiders[j], env.seekers[i], env.hider_hears[j, i])]:
-                if hears:
-                    ax.plot([listener[0], source[0]], [listener[1], source[1]], ":", color=SOUND_COL, linewidth=1.4, zorder=2)
+        for i in range(env.n[team]):
+            for j in range(env.n[OTHER[team]]):
+                if env.hears[team][i, j]:
+                    a, b = env.pos[team][i], env.pos[OTHER[team]][j]
+                    ax.plot([a[0], b[0]], [a[1], b[1]], ":", color=SOUND_COL, linewidth=1.4, zorder=2)
 
-    # dashed lines: which seeker can see which hider
-    for i in range(ns):
-        for j in range(env.n_hiders):
-            if env.seeker_sees[i, j]:
-                (x0, y0), (x1, y1) = env.seekers[i], env.hiders[j]
-                ax.plot([x0, x1], [y0, y1], "--", color=SEEKER_COL, linewidth=1.2)
+    # dashed lines: who sees which enemy (in the viewer's colour)
+    for team in TEAMS:
+        for i in range(env.n[team]):
+            for j in range(env.n[OTHER[team]]):
+                if env.sees[team][i, j]:
+                    a, b = env.pos[team][i], env.pos[OTHER[team]][j]
+                    ax.plot([a[0], b[0]], [a[1], b[1]], "--", color=COLOUR[team], linewidth=1.0, alpha=0.8)
 
-    # agents: a circle the size of their body, and a short line showing where they look.
-    # A dashed ring means the agent ran this step (made noise enemies nearby can hear).
+    # the spike
+    if env.spike is not None:
+        ax.scatter(env.spike[0], env.spike[1], s=260 if env.W <= 15 else 120, marker="*", color="#ffd400",
+                   edgecolors="black", linewidths=0.8, zorder=5)
+
+    # players: a circle the size of their body and a short line showing where they look; dashed ring = noisy,
+    # orange ring = tagged recently, grey X = out
     r = cfg.AGENT_RADIUS
-    for team, positions, headings, noisy, colour in [
-            ("seekers", env.seekers, env.seeker_heading, env.seeker_noisy, SEEKER_COL),
-            ("hiders", env.hiders, env.hider_heading, env.hider_noisy, HIDER_COL)]:
-        for k, (p, h) in enumerate(zip(positions, headings)):
-            if team == "hiders" and not env.hider_alive[k]:
+    for team in TEAMS:
+        for i, (p, h) in enumerate(zip(env.pos[team], env.heading[team])):
+            if not env.alive[team][i]:
                 ax.scatter(p[0], p[1], s=120 if env.W <= 15 else 40, color="#777777", marker="X", zorder=3)
                 continue
-            if noisy[k]:
-                ax.add_patch(Circle((p[0], p[1]), 2.5 * r, fill=False, edgecolor=colour, linestyle="--", linewidth=1.0, zorder=3))
-            ax.add_patch(Circle((p[0], p[1]), r, facecolor=colour, edgecolor="white", linewidth=1.0, zorder=3))
+            if env.noisy[team][i]:
+                ax.add_patch(Circle((p[0], p[1]), 2.5 * r, fill=False, edgecolor=COLOUR[team], linestyle="--",
+                                    linewidth=1.0, zorder=3))
+            if env._window_left(env.last_tag[team][i]) > 0:
+                ax.add_patch(Circle((p[0], p[1]), 1.6 * r, fill=False, edgecolor=TAG_COL, linewidth=2.0, zorder=4))
+            ax.add_patch(Circle((p[0], p[1]), r, facecolor=COLOUR[team], edgecolor="white", linewidth=1.0, zorder=4))
             ax.plot([p[0], p[0] + 2.2 * r * np.cos(h)], [p[1], p[1] + 2.2 * r * np.sin(h)],
-                    color="white", linewidth=1.4, zorder=4)
+                    color="white", linewidth=1.4, zorder=5)
 
-    # title: time, phase, whether hiders are spotted
-    if env.t < cfg.HIDING_PHASE:
-        phase = f"HIDING PHASE ({cfg.HIDING_PHASE - env.t} left)"
-    else:
-        phase = "HUNTING"
-    status = "SPOTTED" if env.hiders_seen.any() else "hidden"
-    if env.seeker_hears.any() or env.hider_hears.any():
-        status += "   HEARD"
-    alive = int(env.hider_alive.sum())
-    title = f"step {env.t}/{cfg.MAX_STEPS}   {phase}   hiders alive {alive}/{env.n_hiders}   {status}"
+    # title: time, phase, players left, plant / spike / defuse
+    phase = f"SETUP ({cfg.SETUP_STEPS - env.t} left)" if env.t < cfg.SETUP_STEPS else "ROUND"
+    left = f"attackers {int(env.alive['attackers'].sum())}/{env.n['attackers']}  defenders {int(env.alive['defenders'].sum())}/{env.n['defenders']}"
+    title = f"step {env.t}   {phase}   {left}"
+    if env.spike is not None:
+        title += f"   SPIKE DOWN ({env.spike_timer} left)"
+        if env.defuse.max() > 0:
+            title += f"   defusing {env.defuse.max()}/{cfg.DEFUSE_STEPS}"
+    elif env.plant["attackers"].max() > 0:
+        title += f"   planting {env.plant['attackers'].max()}/{cfg.PLANT_STEPS}"
     if env.done:
-        title += f"   -> {env.winner.upper()} WIN"
+        title += f"   -> {env.winner.upper()} WIN" if env.winner != "draw" else "   -> DRAW"
     ax.set_title(title, color="#d9d4c7", fontsize=8)
     ax.set_xlim(0, env.W)
     ax.set_ylim(env.H, 0)

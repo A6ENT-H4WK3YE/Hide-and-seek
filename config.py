@@ -2,72 +2,86 @@
 
 # ---------- version ----------
 # Matches a section in formulation.md. Bump it whenever the game rules change
-# (vision cone -> "v2", sound -> "v3", ...) so every run card says which game it trained on.
-GAME_VERSION = "v3.5"
+# (vision cone -> "v2", sound -> "v3", attack / defend -> "v4", ...) so every run card says which game it trained on.
+# The hide-and-seek game (v1 to v3.5) is kept in git under the tag v3.5-hide-and-seek.
+GAME_VERSION = "v4"
 
 # ---------- map ----------
-# Maps are text files in maps/:  '#' wall, '.' floor, 'h' hider spawn cell,
-# 's' seeker spawn cell, 'A' 'B' 'C' site cells (every non-'#' cell is walkable)
-# Stage 1: maps/tiny.txt (11x11, fast debugging)
-# Stage 2: maps/three_sites.txt (45x31, FPS-style) -> raise MAX_STEPS to ~250
-#          and HIDING_PHASE to ~30 when you switch
+# Maps are text files in maps/:  '#' wall, '.' floor, 'h' defender spawn cell (top),
+# 's' attacker spawn cell (bottom), 'A' 'B' 'C' site cells (every non-'#' cell is walkable)
 # Every '#' cell becomes a solid 1 x 1 square; agents move freely (continuously) on the rest.
 MAP_FILE = "maps/three_sites.txt"
 FIXED_EVAL_SEED = 0     # same spawns for every recorded GIF, for fair comparison
 
 # ---------- teams ----------
-MIN_TEAM_SIZE = 1
-MAX_TEAM_SIZE = 5
-RANDOM_TEAM_SIZES = False   # False: always use the sizes below; True: random each round
-N_SEEKERS = 2           # 1v1 on tiny.txt is always a hider win with perfect play (see formulation.md)
-N_HIDERS = 1
+# Two teams, as in Valorant / CS: attackers try to plant on a site, defenders try to stop them.
+MAX_TEAM_SIZE = 5       # observations always have room for this many players per team (bigger teams later)
+N_ATTACKERS = 2
+N_DEFENDERS = 2
 
 # ---------- round ----------
-MAX_STEPS = 250         # time limit per round (discrete steps); 100 on tiny.txt
-HIDING_PHASE = 30       # seekers frozen for this many steps at the start; 15 on tiny.txt
+MAX_STEPS = 250         # time limit per round (1 step = about 1 second); defenders win if time runs out
+SETUP_STEPS = 30        # attackers are frozen (and nobody can tag) for this many steps, so defenders can take positions
 
-# ---------- bodies and movement (1 unit = 1 map cell, 1 step = about 1 second) ----------
+# ---------- bodies and movement (1 unit = 1 map cell) ----------
 AGENT_RADIUS = 0.3      # agents are circles 0.6 wide, so they fit through 1-wide corridors
 MOVE_SPEED = 1.0        # units per step when running, the same for forward, back and strafing
-WALK_SPEED_FACTOR = 0.5 # walking is this fraction of running speed, but silent (like holding Shift in CS)
+WALK_SPEED_FACTOR = 0.5 # walking is this fraction of running speed, but silent (like holding Shift)
 MOVE_SUBSTEPS = 4       # each move is done in this many small pieces so nobody clips through a corner
 TURN_ANGLES = [-90, -30, -10, -3, 0, 3, 10, 30, 90]   # degrees per step; positive = clockwise on screen
 
-# ---------- vision and catching ----------
+# ---------- vision ----------
 VISION_CONE = 90        # degrees, centred on where the agent is looking; no range limit, walls block it
 N_RAYS = 31             # rays spread evenly across the cone (one every 3 degrees) describe the layout
 RAY_NORM = 20.0         # distances in observations are divided by this (keeps the numbers near 0 to 1)
-CATCH_DISTANCE = 0.8    # caught if a seeker's centre is within this distance of the hider's centre...
-CATCH_ANGLE = 30        # ...the hider is within this many degrees of where the seeker looks, and in sight
-MEMORY_DECAY = 0.9      # how fast each agent's own "last seen enemy" memory fades each step
+MEMORY_DECAY = 0.97     # how fast the team's "last known enemy position" marks fade each step (about 30 steps)
+
+# ---------- tags (the short-range "shot") ----------
+# A tag is like a shot at close range: the enemy must be in sight, within TAG_RANGE and within TAG_ANGLE of where
+# you look. One tag does not take a player out: it marks them for TAG_WINDOW steps. A player is OUT when tagged by
+# TAGS_TO_OUT DIFFERENT enemies within that window. So taking someone out needs two teammates working together
+# (one keeps a tail and calls it in, the other closes in), and a lone survivor cannot take anyone out on his own.
+TAG_RANGE = 3.0
+TAG_ANGLE = 20
+TAG_WINDOW = 8
+TAGS_TO_OUT = 2         # capped at the enemy team's size, so 1v1 still works
+
+# ---------- objective (Valorant's spike) ----------
+# An attacker standing still on a site cell plants; PLANT_STEPS steps in a row (moving, being out or the setup phase
+# interrupt it) drops the spike there. From then on the round timer stops and the spike counts down SPIKE_STEPS:
+# attackers win if it runs out, defenders win if one of them defuses it (stands still within DEFUSE_RANGE of the
+# spike for DEFUSE_STEPS in a row). Taking out every attacker after the plant does not win on its own: the spike
+# still has to be defused (as in Valorant). Planting and defusing make noise. Everyone knows where a planted spike is.
+PLANT_STEPS = 5
+SPIKE_STEPS = 40        # long enough for defenders on another site to run over and retake (about 30 steps away)
+DEFUSE_STEPS = 7
+DEFUSE_RANGE = 1.0
 
 # ---------- sound ----------
-HEARING_FRACTION = 0.25 # an enemy running (and moving) is heard within this straight-line distance, as a fraction of
-                        # the map's longer side: about 11 cells on three_sites (45 x 31), about 3 on tiny (11 x 11).
-                        # Sound goes through walls (v3 / v3.1 used 6 cells of walking distance, which walls blocked)
+HEARING_FRACTION = 0.25 # running (or planting) is heard by enemies within this straight-line distance, as a fraction of
+                        # the map's longer side: about 11 cells on three_sites (45 x 31). Sound goes through walls
 
-# ---------- team search memory and minimap ----------
-SEARCH_MEMORY_STEPS = 60  # shared "searched recently" marks fade to 0 over this many steps (about a minute; v3.4,
-                          # was 10: on a 250-step round seekers forgot everything searched more than 10 s ago)
+# ---------- team information and minimap ----------
+SEARCH_MEMORY_STEPS = 60  # shared "searched recently" marks fade to 0 over this many steps
 MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SIZE for every agent
 
 # ---------- rewards ----------
-# Written from the seekers' side. All rewards are shared by the whole team,
-# and hiders always get exactly minus what seekers get (zero-sum).
-# The per-step rewards are small, so following a hider without catching it never pays more than catching.
-REWARD_SEEN = 0.2       # per step a hider is in sight: seekers + REWARD_SEEN x closeness (v2: 0.05)
-CLOSENESS_RANGE = 10.0  # closeness is 1 when touching, falling evenly to 0 at this distance
-REWARD_UNSEEN = -0.05   # per step no hider is in sight
-REWARD_CATCH = 10.0     # per catch
-REWARD_WIN = 20.0       # all hiders caught... (v3.5: was 10)
-REWARD_TIME_BONUS = 10.0  # ...plus up to this much more for the time left (earlier = bigger)
-REWARD_LOSS = -20.0     # hiders survive to the time limit (v3.5: was -10)
-HIDER_NOISE_COST = 0.0  # hiders only: they lose this every step a hider runs and moves (makes noise). v3.3 used 0.02
-                        # as a hint while the seekers were frozen (it broke zero-sum on purpose); v3.5 removes it again
-                        # because hiders now walk anyway, and it stopped them ever running away
+# Written from the attackers' side; defenders always get exactly minus this (zero-sum), shared by the whole team.
+# Only real game events count, plus one shaping term that provably cannot change the best strategy (see below).
+REWARD_TAG = 2.0        # each new tag on an enemy (like damage dealt); re-tagging inside the window pays nothing
+REWARD_OUT = 10.0       # each enemy taken out
+REWARD_PLANT = 5.0      # the spike goes down (a real milestone of the round, like a tag)
+REWARD_WIN = 20.0       # round won (spike explodes or every defender out; for defenders: defuse, every attacker out
+                        # before the plant, or time runs out before the plant)
+SITE_SHAPING = 1.0      # potential-based shaping for attackers: potential = -SITE_SHAPING x (walking distance from the
+                        # closest attacker to a site / longest such distance on the map). The reward is
+                        # GAMMA x new potential - old potential: going towards a site pays a little, walking away pays
+                        # it back. This kind of shaping provably leaves the best strategies unchanged; it only helps
+                        # attackers find the sites early in training. Defenders get minus it, like everything else
+                        # (the potential is 0 once the spike is down)
 
 # ---------- actions ----------
-# every step each agent picks two things at once:
+# every step each agent picks three things at once:
 #   move: 0 stay, 1 forward, 2 back, 3 strafe left, 4 strafe right (relative to where it looks)
 #   turn: an index into TURN_ANGLES
 #   switch: 0 keep my walk / run mode, 1 switch it (walk = half speed, silent; run = full speed, can be heard).
@@ -75,59 +89,41 @@ HIDER_NOISE_COST = 0.0  # hiders only: they lose this every step a hider runs an
 N_MOVES = 5
 N_TURNS = len(TURN_ANGLES)
 N_SPEEDS = 2
-SWITCH_KEEP_PROB = 0.95 # an untrained network presses "keep" this often (switches 5% of the time), so its walk / run
-                        # mode stays put for long stretches; with 50 / 50 the mode flipped almost every step
+SWITCH_KEEP_PROB = 0.95 # an untrained network presses "keep" this often (switches 5% of the time)
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
-TOTAL_STEPS = 5_000_000 # total environment steps across all parallel games (2M was enough on tiny.txt)
+TOTAL_STEPS = 10_000_000  # total environment steps across all parallel games (a new game, learnt from scratch)
 N_ENVS = 16             # games played in parallel (one network call covers all of them)
 ROLLOUT_STEPS = 128     # steps per game collected before each update (16 x 128 = 2048 per update)
 LEARNING_RATE = 3e-4
-GAMMA = 0.997           # discount: how much future rewards count. 0.997 (from v3.5 training on): a hider's win at
-                        # step 250 is still worth half its points at the start of the hunt (with 0.99, a tenth)
+GAMMA = 0.997           # discount: with 250-step rounds, a win at the end still counts about half at the start
 GAE_LAMBDA = 0.95       # advantage smoothing (bias vs variance)
 CLIP_EPS = 0.2          # PPO: how far one update may move the policy
 PPO_EPOCHS = 4          # passes over each batch of experience
 MINIBATCHES = 4         # each batch is split into this many chunks per pass
+SEQ_LEN = 32            # teams with memory learn from pieces of this many steps (each piece starts from the exact
+                        # memory it had during play); shorter than the 128-step rollout, so learning is 1.7x faster
 ENT_COEF = 0.01         # bonus for keeping the policy random (exploration)
 VF_COEF = 0.5           # weight of the value (critic) loss
 MAX_GRAD_NORM = 0.5     # gradient clipping for stability
 HIDDEN = 256            # size of the network's hidden layers
-DEVICE = "cpu"          # "auto" picks the GPU if there is one (NVIDIA/AMD "cuda", Mac "mps"), else CPU.
-                        # CPU is faster here: the network is small and acts on only 32 agents at a time (measured:
-                        # choosing actions 16x slower on the Mac GPU, learning no faster)
-N_WORKERS = 16          # the games run in this many parallel processes (workers.py); one per game was fastest
-                        # (6x faster game stepping than one process on a 15-core M5 Pro)
+DEVICE = "cpu"          # CPU is faster than the Mac GPU for this small network (measured)
+N_WORKERS = 16          # the games run in this many parallel processes (workers.py), one per game
 
 # ---------- which teams learn ----------
-# Both teams learn by default (self-play). With only "hiders" here, the seekers are frozen: they play with the
-# networks saved by an earlier run (FROZEN_RUN), the final one in normal games and the run's earlier checkpoints
-# (from weak to strong) as the opponent pool, so the new hiders also meet seekers they can beat.
-TRAIN_TEAMS = ["seekers", "hiders"]
-FROZEN_RUN = "runs/v3.2_three_sites_2v1_20261021_170702"   # only used for a team that is not in TRAIN_TEAMS
-# Start a team from a saved network instead of from scratch ({} = everyone from scratch). It keeps learning from there.
-START_FROM = {
-    "seekers": "runs/v3.5_both_three_sites_2v1_20261021_220610/checkpoints/latest.pt",   # v3.5 seekers
-    "hiders": "runs/v3.5_both_three_sites_2v1_20261021_220610/checkpoints/latest.pt",    # v3.5 hiders (with memory)
-}
-# Teams whose network has a learned memory (a GRU, see model.py). Loading a network saved without memory adds an empty
-# memory that starts switched off, so the team plays exactly as before until it learns to use it.
-MEMORY_TEAMS = ["hiders"]
+TRAIN_TEAMS = ["attackers", "defenders"]
+FROZEN_RUN = ""         # for a team not in TRAIN_TEAMS: the run whose networks it plays with
+START_FROM = {}         # {team: checkpoint path} to start a team from a saved network ({} = everyone from scratch)
+MEMORY_TEAMS = ["attackers", "defenders"]   # both teams get a learned memory (GRU, see model.py)
 
 # ---------- opponent pool (stops self-play going round in circles) ----------
-# Plain self-play can cycle: hiders pick a side, seekers learn that side, hiders switch, and so on.
-# Playing some games against frozen PAST versions of the other team forces strategies that beat
-# many opponents, not just the current one (the idea behind fictitious play).
 OPPONENT_POOL = True    # False = plain self-play
 POOL_PROB = 0.5         # chance a game uses a past version of one team (which team is picked at random)
-SNAPSHOT_EVERY = 10     # add a snapshot of both teams to the pool every this many updates (at the start, see below)
-ESCAPE_BOT_PROB = 0.25  # share of games where the hider is the cheating escape bot (bots.py) instead of a network.
-                        # Seekers learn from these games (so they must really search, not just exploit one set of
-                        # hiders' habits); hiders do not. 0 switches it off
-POOL_SIZE = 20          # keep at most this many snapshots per team. When the pool is full, every second snapshot
-                        # is dropped and the gap between snapshots doubles, so the pool always spans the whole run
-                        # (from the first random network to the latest), evenly spaced
+SNAPSHOT_EVERY = 10     # add a snapshot of both teams to the pool every this many updates (at the start)
+POOL_SIZE = 20          # when full, every second snapshot is dropped and the gap doubles: the pool spans the whole run
+BOT_TEAM_PROB = 0.2     # share of games where one team (picked at random) is played by the scripted bots (bots.py);
+                        # only the other team learns from those games, so nobody can win by exploiting one opponent
 
 # ---------- benchmark bots (see bots.py) ----------
 BOT_EVAL_GAMES = 100    # games per bot matchup at every recording (0 switches it off)

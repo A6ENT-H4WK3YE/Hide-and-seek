@@ -2,15 +2,16 @@
 # The game (env.py) is plain Python + numpy and only uses one core, and it is most of the training time,
 # so this is where the speed-up is. The network stays in the main process.
 #
-#   games = ParallelGames(map_file, seeds, n_seekers, n_hiders, n_workers)   one game per seed
-#   obs = games.reset()                                                       one observation dict per game
-#   obs, rewards, dones, infos = games.step(seeker_actions, hider_actions, escape_bot)    one entry per game
-#      (escape_bot: optional, one True / False per game: that game's hiders are played by the escape bot instead)
+#   games = ParallelGames(map_file, seeds, sizes, n_workers)       one game per seed, sizes = {team: players}
+#   obs = games.reset()                                            one observation dict per game
+#   obs, rewards, dones, infos = games.step(actions, bot_team)     one entry per game
+#      actions:  {team: array (games, players, 3)}
+#      bot_team: optional, one entry per game: None, or the team the scripted bots play in that game
 #   games.close()
 #
 # A finished game is reset straight away inside its worker, so the observation returned for it is already the
-# start of the next round (exactly what train.py did before). Each game keeps its own random numbers, so results
-# are the same as stepping the games one after another in a single process.
+# start of the next round. Each game keeps its own random numbers, so results are the same as stepping the games
+# one after another in a single process.
 #
 # Each worker is this file run as its own Python process; messages go back and forth as pickles over its
 # stdin / stdout. (Python's multiprocessing would re-run train.py inside every worker on a Mac.)
@@ -24,9 +25,9 @@ import numpy as np
 
 class ParallelGames:
 
-    def __init__(self, map_file, seeds, n_seekers, n_hiders, n_workers):
-        self.n_seekers, self.n_hiders = n_seekers, n_hiders
+    def __init__(self, map_file, seeds, sizes, n_workers):
         n_workers = max(1, min(n_workers, len(seeds)))
+        self.n_games = len(seeds)
         self.parts = np.array_split(np.arange(len(seeds)), n_workers)   # which games each worker plays
         # one thread per worker: the matrices are tiny, and threads fighting over cores only slow things down
         child_env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", VECLIB_MAXIMUM_THREADS="1")
@@ -34,7 +35,7 @@ class ParallelGames:
         self.procs = []
         for part in self.parts:
             p = subprocess.Popen([sys.executable, script], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=child_env)
-            self._send(p, ("init", map_file, [seeds[i] for i in part], n_seekers, n_hiders))
+            self._send(p, ("init", map_file, [seeds[i] for i in part], sizes))
             self.procs.append(p)
         for p in self.procs:
             assert self._recv(p) == "ready", "a game worker failed to start (see the error above)"
@@ -54,12 +55,12 @@ class ParallelGames:
             obs += self._recv(p)
         return obs
 
-    def step(self, seeker_actions, hider_actions, escape_bot=None):
-        # seeker_actions / hider_actions: one row of actions per game. All workers step at the same time.
-        if escape_bot is None:
-            escape_bot = np.zeros(len(seeker_actions), dtype=bool)
+    def step(self, actions, bot_team=None):
+        # all workers step their games at the same time
+        if bot_team is None:
+            bot_team = [None] * self.n_games
         for p, part in zip(self.procs, self.parts):
-            self._send(p, ("step", seeker_actions[part], hider_actions[part], escape_bot[part]))
+            self._send(p, ("step", {team: a[part] for team, a in actions.items()}, [bot_team[e] for e in part]))
         obs, rewards, dones, infos = [], [], [], []
         for p in self.procs:
             for o, r, d, info in self._recv(p):
@@ -83,26 +84,31 @@ def serve():
     # the worker side: wait for a message, do it, send the answer back
     inp, out = sys.stdin.buffer, sys.stdout.buffer
     sys.stdout = sys.stderr          # anything printed must not end up in the message pipe
-    from env import HideSeekEnv
+    from env import GameEnv
     from bots import Bots
-    envs, bots, seeds, n_seekers, n_hiders = [], [], [], 0, 0
+    envs, bots, seeds, sizes = [], [], [], None
     while True:
         msg = pickle.load(inp)
         if msg[0] == "init":
-            map_file, seeds, n_seekers, n_hiders = msg[1:]
-            envs = [HideSeekEnv(map_file) for _ in seeds]
-            bots = [Bots(env) for env in envs]          # for games where the escape bot plays the hiders
+            map_file, seeds, sizes = msg[1:]
+            envs = [GameEnv(map_file) for _ in seeds]
+            bots = [Bots(env, seed=s) for env, s in zip(envs, seeds)]    # for games where the bots play one team
             reply = "ready"
         elif msg[0] == "reset":
-            reply = [env.reset(seed=s, n_seekers=n_seekers, n_hiders=n_hiders) for env, s in zip(envs, seeds)]
+            reply = []
+            for env, bot, s in zip(envs, bots, seeds):
+                reply.append(env.reset(seed=s, sizes=sizes))
+                bot.reset()
         elif msg[0] == "step":
             reply = []
-            for env, bot, sa, ha, use_bot in zip(envs, bots, msg[1], msg[2], msg[3]):
-                if use_bot:
-                    ha = bot.escape_actions()
-                o, r, done, info = env.step(sa, ha)
+            for k, (env, bot) in enumerate(zip(envs, bots)):
+                acts = {team: a[k] for team, a in msg[1].items()}
+                if msg[2][k] is not None:
+                    acts[msg[2][k]] = bot.actions(msg[2][k])
+                o, r, done, info = env.step(acts)
                 if done:
-                    o = env.reset(n_seekers=n_seekers, n_hiders=n_hiders)
+                    o = env.reset(sizes=sizes)
+                    bot.reset()
                 reply.append((o, r, done, info))
         else:
             break
