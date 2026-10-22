@@ -31,6 +31,12 @@ The current version: v4 (below) with two changes, both from Moeez's feedback on 
   pays this alone; the other team does not gain it, so it is the one part of the rewards that is not zero-sum. Far too
   small to change who wins (a round is worth 20), it only teaches clean movement. Logged as `wall_bump_rate` (random play
   bumps on about 5% of moves).
+- **First 30M run stopped at 2M steps and restarted with two reward changes** (Claude, under Moeez's "interrupt to fix
+  anything bad"): attackers had never planted and never reached a site (closest 9 to 22 cells, "stay" 53% of moves),
+  takedowns were almost zero, defenders spun in place waiting. Attackers lose the round either way, and walking towards
+  defenders who hold angles also cost -10 per player lost, so staying home was their safest option and they never found
+  the plant. Changes: takedown reward 10 -> 2 (the round is what matters; a takedown is only a means to it) and site
+  shaping 1 -> 5 (still potential-based, so it still cannot change the best strategies or be farmed).
 
 ## v4: attack and defend (Valorant / CS style), with tags instead of guns
 

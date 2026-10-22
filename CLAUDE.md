@@ -19,6 +19,8 @@ The exact rules of every game version are in `formulation.md`; this file is the 
   Claude checks it about every 45 minutes (background timer) for: crashes, NaN or exploding KL, entropy collapsing
   early, wall bumps not falling, a team stuck at 0% or 100% for a long time, plants never happening.
   The first v4 run (three sites, tags) was stopped at 300k steps (attackers had never planted).
+- The first 30M run was stopped at 2M steps: attackers stayed home (never on a site, "stay" 53%), no plants, no
+  takedowns. Restarted from scratch with takedown reward 10 -> 2 and site shaping 1 -> 5 (see formulation.md).
 - After the run: evaluate.py, GIFs (orange ring = being watched), and behaviour: which site attackers hit, do they go
   together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
 - Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.
@@ -37,7 +39,7 @@ The exact rules of every game version are in `formulation.md`; this file is the 
   within 1 unit for 7 steps. Round timer stops at the plant; after the plant, a wipe of the attackers does not win, the
   spike must be defused. Plant-equals-win was tried first: bots v bots gave attackers 78% (race to an empty site);
   with retakes 64%.
-- Rewards (zero-sum, attackers' side): takedown +10, plant +5, win +20 (v4 also had tag +2); potential-based site shaping for
+- Rewards (zero-sum, attackers' side): takedown +2 (was 10), plant +5, win +20 (v4 also had tag +2); site shaping 5 (was 1); potential-based site shaping for
   attackers (cannot change the best strategies). No seen / unseen, distance or exploration rewards.
 - Observations: rays; enemies known to the team (seen or heard by anyone, team callouts) with flags; teammates;
   20 numbers incl. the spike; minimap with sites, team search memory and team enemy memory.

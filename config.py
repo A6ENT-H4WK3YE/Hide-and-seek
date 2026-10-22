@@ -68,14 +68,15 @@ MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SI
 # Written from the attackers' side; defenders always get exactly minus this (zero-sum), shared by the whole team.
 # Only real game events count (takedowns, the plant, the round), plus one shaping term that provably cannot change the
 # best strategy (see below).
-REWARD_OUT = 10.0       # each enemy taken out
+REWARD_OUT = 2.0        # each enemy taken out (10 in the first v4.1 run: losing a player cost half a round, so attackers
+                        # learned to stay home and never reached a site; the round is what matters)
 REWARD_PLANT = 5.0      # the spike goes down (a real milestone of the round, like a tag)
 REWARD_WIN = 20.0       # round won (spike explodes or every defender out; for defenders: defuse, every attacker out
                         # before the plant, or time runs out before the plant)
 WALL_COST = 0.02        # a player that tries to move but is mostly blocked by a wall (moves less than half the way) pays
                         # this, alone: the other team does not gain it, so it is the one part that is not zero-sum.
                         # Teaches clean movement; far too small to matter next to a round (20)
-SITE_SHAPING = 1.0      # potential-based shaping for attackers: potential = -SITE_SHAPING x (walking distance from the
+SITE_SHAPING = 5.0      # (1.0 in the first v4.1 run, too weak to get attackers to a site) potential-based shaping for attackers: potential = -SITE_SHAPING x (walking distance from the
                         # closest attacker to a site / longest such distance on the map). The reward is
                         # GAMMA x new potential - old potential: going towards a site pays a little, walking away pays
                         # it back. This kind of shaping provably leaves the best strategies unchanged; it only helps
