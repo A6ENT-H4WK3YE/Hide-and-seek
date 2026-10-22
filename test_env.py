@@ -7,7 +7,7 @@ import time
 import tempfile
 import numpy as np
 import config as cfg
-from env import (GameEnv, TEAMS, NO_TURN, NEVER, HIT_WALL, HIT_TEAMMATE, HIT_ENEMY, N_MINIMAP_CHANNELS, RAY_FEATURES,
+from env import (GameEnv, TEAMS, NO_TURN, HIT_WALL, HIT_TEAMMATE, HIT_ENEMY, N_MINIMAP_CHANNELS, RAY_FEATURES,
                  ENEMY_FEATURES, MATE_FEATURES, VEC_DIM, MM_ME, MM_SITES, MM_ENEMIES, MM_SEARCHED)
 from geometry import overlaps_wall, line_clear
 
@@ -61,7 +61,7 @@ def place(env, att, dfn, t=GO, running=True):
         env.plant[team] = np.zeros(len(players), dtype=int)
     for team in TEAMS:
         other = "defenders" if team == "attackers" else "attackers"
-        env.last_tag[team] = np.full((env.n[team], env.n[other]), NEVER)
+        env.watch[team] = np.zeros((env.n[team], env.n[other]), dtype=int)
     env.offset = {"attackers": 0, "defenders": env.n["attackers"]}
     env.defuse = np.zeros(env.n["defenders"], dtype=int)
     env.spike, env.spike_timer = None, 0
@@ -182,60 +182,67 @@ ms = (time.time() - t0) / 300 * 1000
 check(f"vision speed: {ms:.2f} ms per step for 4 players on three_sites (under 3 ms)", ms < 3.0)
 
 # ======================================================================
-# tags and eliminations
+# taking players out: keep them in your sights for WATCH_STEPS steps in a row
 # ======================================================================
-place(env, att=[(3.0, 2.5, 0), (11.5, 1.5, 90)], dfn=[(5.5, 2.5, 0), (1.5, 4.5, 0)])
+place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)])
+for _ in range(cfg.WATCH_STEPS - 1):
+    _, r, done, info, shaping = act(env)
+check(f"in sight and straight ahead for {cfg.WATCH_STEPS - 1} steps: not out yet (count {env.watch['attackers'][0, 0]})",
+      env.alive["defenders"][0] and env.watch["attackers"][0, 0] == cfg.WATCH_STEPS - 1)
 _, r, done, info, shaping = act(env)
-check(f"in sight, {2.5} away (range {cfg.TAG_RANGE}), straight ahead: tagged", env.last_tag["defenders"][0, 0] == env.t)
-check("one tag does not take a player out", env.alive["defenders"][0] and not done)
-check(f"a fresh tag pays the attackers +{cfg.REWARD_TAG} (zero-sum)",
-      close(r["attackers"][0] - shaping, cfg.REWARD_TAG) and close(r["defenders"][0], -r["attackers"][0]))
-_, r, _, info, shaping = act(env)
-check("tagging the same player again inside the window pays nothing extra", close(r["attackers"][0] - shaping, 0.0))
-
-place(env, att=[(2.0, 2.5, 0), (11.5, 1.5, 90)], dfn=[(5.5, 2.5, 0), (1.5, 4.5, 0)])
-act(env)
-check(f"3.5 away (range {cfg.TAG_RANGE}): no tag", env.last_tag["defenders"][0, 0] == NEVER)
-place(env, att=[(3.0, 2.5, -30), (11.5, 1.5, 90)], dfn=[(5.5, 2.5, 0), (1.5, 4.5, 0)])
-act(env)
-check(f"30 degrees off where the attacker looks (needs {cfg.TAG_ANGLE}): seen but no tag",
-      env.sees["attackers"][0, 0] and env.last_tag["defenders"][0, 0] == NEVER)
-place(env, att=[(5.2, 5.5, 0), (11.5, 1.5, 90)], dfn=[(7.8, 5.5, 180), (1.5, 1.5, 0)])
-act(env)
-check("a wall in between: no tag", env.last_tag["defenders"][0, 0] == NEVER and env.last_tag["attackers"][0, 0] == NEVER)
-
-place(env, att=[(3.0, 2.5, 0), (5.5, 4.5, -90)], dfn=[(5.5, 2.5, 90), (1.5, 4.5, 0)])
-_, r, done, info, shaping = act(env)
-check("tagged by two different enemies on the same step: out", not env.alive["defenders"][0] and info["outs"]["attackers"] == 1)
-check(f"two tags and a takedown pay {2 * cfg.REWARD_TAG + cfg.REWARD_OUT} (the defender tagged back: -{cfg.REWARD_TAG})",
-      close(r["attackers"][0] - shaping, 2 * cfg.REWARD_TAG + cfg.REWARD_OUT - cfg.REWARD_TAG * info["tags"]["defenders"]))
+check(f"after {cfg.WATCH_STEPS} steps in a row: out", not env.alive["defenders"][0] and info["outs"]["attackers"] == 1)
+check(f"a takedown pays the attackers +{cfg.REWARD_OUT} (zero-sum)",
+      close(r["attackers"][0] - shaping, cfg.REWARD_OUT) and close(r["defenders"][0], -r["attackers"][0]))
 check("a player who is out is no longer seen", not env.sees["attackers"][:, 0].any())
 
-place(env, att=[(3.0, 2.5, 0), (11.5, 1.5, 90)], dfn=[(5.5, 2.5, 0), (1.5, 4.5, 0)])
-act(env)
-env.pos["attackers"][0] = [11.5, 2.5]        # attacker 0 leaves; attacker 1 comes in after the window has passed
-for _ in range(cfg.TAG_WINDOW):
+place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)])
+for _ in range(cfg.WATCH_STEPS - 2):
     act(env)
-env.pos["attackers"][1] = [3.0, 2.5]
-env.heading["attackers"][1] = 0.0
-act(env)
-check(f"two tags more than {cfg.TAG_WINDOW} steps apart: not out", env.alive["defenders"][0])
+act(env, att=[[0, cfg.TURN_ANGLES.index(90), KEEP], STAY])     # look away for one step
+check("looking away for one step restarts the count", env.watch["attackers"][0, 0] == 0)
+act(env, att=[[0, cfg.TURN_ANGLES.index(-90), KEEP], STAY])    # look back: counting from 1 again
+for _ in range(cfg.WATCH_STEPS - 2):
+    act(env)
+check("so the defender is still in", env.alive["defenders"][0])
 
-place(env, att=[(3.0, 2.5, 0), (11.5, 1.5, 90)], dfn=[(5.5, 2.5, 0), (1.5, 4.5, 0)])
-env.alive["attackers"][1] = False             # a lone survivor
-env._update_sight()
+place(env, att=[(2.5, 2.5, -40), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)])
+for _ in range(cfg.WATCH_STEPS):
+    act(env)
+check(f"40 degrees off where the attacker looks (needs {cfg.WATCH_ANGLE}): in view but never taken out",
+      env.sees["attackers"][0, 0] and env.alive["defenders"][0] and env.watch["attackers"][0, 0] == 0)
+
+place(env, att=[(5.2, 5.5, 0), (11.5, 1.5, 90)], dfn=[(7.8, 5.5, 180), (1.5, 1.5, 180)])
+for _ in range(cfg.WATCH_STEPS):
+    act(env)
+check("a wall in between: neither counts, neither goes out", env.watch["attackers"][0, 0] == 0
+      and env.watch["defenders"][0, 0] == 0 and env.alive["defenders"][0] and env.alive["attackers"][0])
+
+place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)])
 for _ in range(3):
     act(env)
-check("a lone survivor cannot take anyone out on his own", env.alive["defenders"][0])
+env.heading["defenders"][0] = np.pi            # the defender turns round 3 steps late
+env._update_sight()
+for _ in range(cfg.WATCH_STEPS - 3):
+    act(env)
+check("watching each other: whoever started first finishes first (the attacker started 3 steps earlier)",
+      not env.alive["defenders"][0] and env.alive["attackers"][0])
 
-one = make_env(TEST_MAP, sizes={"attackers": 1, "defenders": 1})
-place(one, att=[(3.0, 2.5, 0)], dfn=[(5.5, 2.5, 0)])
-act(one)
-check("1v1: one tag is enough (TAGS_TO_OUT is capped at the enemy team's size)", not one.alive["defenders"][0])
+losers = {"attackers": 0, "defenders": 0}
+for k in range(40):
+    place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 180), (1.5, 4.5, 180)])
+    env.rng = np.random.default_rng(k)
+    for _ in range(cfg.WATCH_STEPS):
+        act(env)
+    alive = (env.alive["attackers"][0], env.alive["defenders"][0])
+    assert alive in [(True, False), (False, True)], alive
+    losers["defenders" if alive[0] else "attackers"] += 1
+check(f"watching each other from the same moment: exactly one goes out, a coin flip (40 tries: {losers})",
+      10 <= losers["attackers"] <= 30)
 
-place(env, att=[(3.0, 2.5, 0), (5.5, 4.5, -90)], dfn=[(5.5, 2.5, 90), (1.5, 4.5, 0)], t=0)
-act(env, dfn=[STAY, STAY])
-check("no tags during the setup phase", env.alive["defenders"][0] and env.last_tag["defenders"][0].max() == NEVER)
+place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)], t=0)
+for _ in range(cfg.SETUP_STEPS - 1):
+    act(env)
+check("nobody counts or goes out during the setup phase", env.watch["attackers"].max() == 0 and env.alive["defenders"][0])
 
 # ======================================================================
 # planting, spike, defusing and round end
@@ -281,10 +288,11 @@ check(f"winning pays the defenders +{cfg.REWARD_WIN}", close(r["defenders"][0] +
 place(env, att=[(11.5, 1.5, 0), (11.5, 2.5, 0)], dfn=[(1.5, 1.5, 180), (1.5, 2.5, 180)], t=cfg.MAX_STEPS - 1)
 _, r, done, info, _ = act(env)
 check("time runs out before a plant: defenders win", done and info["winner"] == "defenders")
-place(env, att=[(3.0, 2.5, 0), (5.5, 4.5, -90)], dfn=[(5.5, 2.5, 90), (1.5, 4.5, 0)])
+place(env, att=[(2.5, 2.5, 0), (11.5, 1.5, 90)], dfn=[(8.5, 2.5, 0), (1.5, 4.5, 180)])
 env.alive["defenders"][1] = False
 env._update_sight()
-_, r, done, info, _ = act(env)
+for _ in range(cfg.WATCH_STEPS):
+    _, r, done, info, _ = act(env)
 check("every defender out: attackers win", done and info["winner"] == "attackers")
 
 place(env, att=[(11.5, 1.5, 0), (11.5, 2.5, 0)], dfn=[(1.5, 1.5, 180), (1.5, 2.5, 180)])

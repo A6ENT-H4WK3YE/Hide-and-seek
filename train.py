@@ -83,9 +83,9 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- git commit: {git_commit()}\n")
     f.write(f"- device: {device}, {cfg.N_WORKERS} game workers\n")
     f.write(f"- map: {cfg.MAP_FILE}, teams: {cfg.N_ATTACKERS} attackers v {cfg.N_DEFENDERS} defenders\n")
-    f.write(f"- tags: range {cfg.TAG_RANGE}, angle {cfg.TAG_ANGLE}, out after {cfg.TAGS_TO_OUT} different enemies within "
-            f"{cfg.TAG_WINDOW} steps; plant {cfg.PLANT_STEPS} steps, spike {cfg.SPIKE_STEPS}, defuse {cfg.DEFUSE_STEPS}\n")
-    f.write(f"- rewards (attackers; defenders get minus): tag {cfg.REWARD_TAG:+}, out {cfg.REWARD_OUT:+}, "
+    f.write(f"- out after {cfg.WATCH_STEPS} steps in an enemy's sights (within {cfg.WATCH_ANGLE} degrees); "
+            f"plant {cfg.PLANT_STEPS} steps, spike {cfg.SPIKE_STEPS}, defuse {cfg.DEFUSE_STEPS}\n")
+    f.write(f"- rewards (attackers; defenders get minus): out {cfg.REWARD_OUT:+}, "
             f"plant {cfg.REWARD_PLANT:+}, win {cfg.REWARD_WIN:+}, site shaping {cfg.SITE_SHAPING} (potential-based)\n")
     f.write(f"- learning: {', '.join(cfg.TRAIN_TEAMS)}; memory: {', '.join(cfg.MEMORY_TEAMS)}; "
             f"bots play one team in {cfg.BOT_TEAM_PROB:.0%} of games; discount {cfg.GAMMA}\n")

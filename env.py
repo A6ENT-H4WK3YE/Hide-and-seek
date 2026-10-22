@@ -1,14 +1,13 @@
-# v4: a two-team attack / defend game in continuous space, in the style of Valorant / CS, with short-range tags
-# instead of guns.
+# v4: a two-team attack / defend game in continuous space, in the style of Valorant / CS (without guns).
 #
 #   attackers (spawn at the bottom) plant the spike on a site (stand still on a site cell for PLANT_STEPS steps in a
 #             row); they win if it is not defused within SPIKE_STEPS, or if every defender is out
 #   defenders (spawn at the top, next to the sites) win by defusing the spike (stand still next to it for
 #             DEFUSE_STEPS in a row), by taking every attacker out before the plant, or if time runs out before it
 #
-# A tag needs the enemy in sight, within TAG_RANGE and within TAG_ANGLE of where you look. One tag only marks a
-# player; tags from TAGS_TO_OUT different enemies within TAG_WINDOW steps take them out. So eliminations need two
-# teammates working together, and a lone survivor cannot take anyone out alone.
+# Taking someone out (v4.1): keep them in sight, within WATCH_ANGLE of where you look, for WATCH_STEPS steps in a
+# row. Whoever starts watching first finishes first; same-step finishes (like two players watching each other) are
+# settled by a coin flip.
 #
 # Usage:
 #   env = GameEnv()
@@ -21,10 +20,10 @@
 #   "enemies": (MAX_TEAM_SIZE, 9)       enemies my team knows about right now, nearest first (empty slots are 0):
 #                                       known, direction from me relative to where I look (cos, sin), distance,
 #                                       I see it, a teammate sees it, only heard (nobody sees it),
-#                                       my team tagged it recently (time left in the window), planting (progress)
-#   "mates":   (MAX_TEAM_SIZE - 1, 7)   my teammates: still in, direction (cos, sin), distance, tagged recently
-#                                       (time left in the window), planting (progress), sees an enemy
-#   "vec":     (20,)                    my position, heading (cos, sin), time, setup phase, running, tagged recently,
+#                                       how far my team is towards taking it out (best watch count), planting
+#   "mates":   (MAX_TEAM_SIZE - 1, 7)   my teammates: still in, direction (cos, sin), distance, how far it is
+#                                       towards taking an enemy out (its best watch count), planting, sees an enemy
+#   "vec":     (20,)                    my position, heading (cos, sin), time, setup phase, running, my best watch count,
 #                                       my plant progress, the attackers' best plant progress (everyone hears a plant),
 #                                       standing on a site, attacker or not, teammates still in, enemies still in,
 #                                       spike down, spike time left, spike direction (cos, sin) and distance,
@@ -64,9 +63,8 @@ VEC_DIM = 20
 # ray directions relative to the heading, spread evenly across the cone (left edge to right edge)
 RAY_OFFSETS = np.radians(np.linspace(-cfg.VISION_CONE / 2, cfg.VISION_CONE / 2, cfg.N_RAYS))
 HALF_CONE = np.radians(cfg.VISION_CONE / 2)
-TAG_ANGLE = np.radians(cfg.TAG_ANGLE)
+WATCH_ANGLE = np.radians(cfg.WATCH_ANGLE)
 RAY_SAMPLE = 0.5       # spacing of points along each ray, used to mark which map cells a cone covers
-NEVER = -1e9           # "last tagged at" for players never tagged
 
 # minimap channels (the whole map shrunk to MINIMAP_SIZE x MINIMAP_SIZE)
 MM_WALLS = 0       # fraction of each block that is wall
@@ -172,8 +170,8 @@ class GameEnv:
         self.running = {team: np.zeros(self.n[team], dtype=bool) for team in TEAMS}
         self.noisy = {team: np.zeros(self.n[team], dtype=bool) for team in TEAMS}
         self.plant = {team: np.zeros(self.n[team], dtype=int) for team in TEAMS}      # steps planted in a row
-        # last_tag[team][j, i]: the step when enemy i last tagged my player j
-        self.last_tag = {team: np.full((self.n[team], self.n[OTHER[team]]), NEVER) for team in TEAMS}
+        # watch[team][i, j]: how many steps in a row my player i has kept enemy j in its sights
+        self.watch = {team: np.zeros((self.n[team], self.n[OTHER[team]]), dtype=int) for team in TEAMS}
         self.defuse = np.zeros(self.n["defenders"], dtype=int)    # defenders' defuse steps in a row
         self.spike = None              # where the spike is once planted
         self.spike_timer = 0           # steps left before it explodes
@@ -232,40 +230,34 @@ class GameEnv:
         self._update_sight()
         self._update_hearing()
 
-        # tags and eliminations (not during the setup phase)
-        tags = {team: 0 for team in TEAMS}      # new tags made BY each team this step
+        # watching and eliminations (not during the setup phase)
         outs = {team: 0 for team in TEAMS}      # enemies taken out BY each team this step
         if not setup:
-            # every player tags at most one enemy per step: the nearest one it can tag right now
-            new_tags = []
+            # count steps in a row each player keeps each enemy in its sights; anything else restarts the count
             for team in TEAMS:
-                for i in np.where(self.alive[team])[0]:
-                    ok = self.sees[team][i] & (self.dist[team][i] <= cfg.TAG_RANGE) & (np.abs(self.angle[team][i]) <= TAG_ANGLE)
-                    if ok.any():
-                        j = int(np.argmin(np.where(ok, self.dist[team][i], np.inf)))
-                        new_tags.append((team, i, j))
-            for team, i, j in new_tags:
+                in_sights = self.sees[team] & (np.abs(self.angle[team]) <= WATCH_ANGLE)
+                self.watch[team] = np.where(in_sights, self.watch[team] + 1, 0)
+            # everyone who reaches WATCH_STEPS takes their target out, in a random order: a player taken out earlier
+            # in the same step does not get its own takedown (so a mutual finish is a coin flip)
+            finishes = [(team, i, j) for team in TEAMS for i, j in zip(*np.where(self.watch[team] >= cfg.WATCH_STEPS))]
+            for k in self.rng.permutation(len(finishes)):
+                team, i, j = finishes[k]
                 victims = OTHER[team]
-                if self.t - self.last_tag[victims][j, i] > cfg.TAG_WINDOW:
-                    tags[team] += 1             # a fresh tag; re-tagging inside the window only refreshes it
-                self.last_tag[victims][j, i] = self.t
-            # out: tagged by enough different enemies within the window
-            for team in TEAMS:
-                need = min(cfg.TAGS_TO_OUT, self.n[OTHER[team]])
-                recent = (self.t - self.last_tag[team] <= cfg.TAG_WINDOW).sum(axis=1)
-                for j in np.where(self.alive[team] & (recent >= need))[0]:
-                    self.alive[team][j] = False
-                    self.plant[team][j] = 0
-                    if team == "defenders":
+                if self.alive[team][i] and self.alive[victims][j]:
+                    self.alive[victims][j] = False
+                    self.plant[victims][j] = 0
+                    if victims == "defenders":
                         self.defuse[j] = 0
-                    self.noisy[team][j] = False
-                    outs[OTHER[team]] += 1
+                    self.noisy[victims][j] = False
+                    outs[team] += 1
             if outs["attackers"] or outs["defenders"]:
+                for team in TEAMS:              # nobody keeps counting on (or by) players who are out
+                    self.watch[team] *= self.alive[team][:, None] & self.alive[OTHER[team]][None, :]
                 self._update_sight()            # players who are out leave the game, nobody sees or hears them
                 self._update_hearing()
 
         # rewards, written from the attackers' side (defenders get exactly minus this)
-        r = cfg.REWARD_TAG * (tags["attackers"] - tags["defenders"]) + cfg.REWARD_OUT * (outs["attackers"] - outs["defenders"])
+        r = cfg.REWARD_OUT * (outs["attackers"] - outs["defenders"])
 
         # the spike goes down when an attacker finishes planting
         planted_now = False
@@ -313,7 +305,6 @@ class GameEnv:
             "planted": self.spike is not None,
             "planted_now": planted_now,
             "defused": self.winner == "defenders" and self.spike is not None,
-            "tags": tags,
             "outs": outs,
             "alive": {team: self.alive[team].copy() for team in TEAMS},
             "any_seen": bool(self.sees["attackers"].any() or self.sees["defenders"].any()),
@@ -435,11 +426,13 @@ class GameEnv:
         rows, cols = self.block_rows[y], self.block_cols[x]
         layer[rows, cols] = np.maximum(layer[rows, cols], value)
 
-    def _window_left(self, last):
-        # how much of the tag window is left after the most recent of these tags (1 = just tagged, 0 = no tag)
-        if len(last) == 0:
-            return 0.0
-        return float(np.clip(1.0 - (self.t - np.max(last)) / (cfg.TAG_WINDOW + 1), 0.0, 1.0))
+    def watch_progress(self, team, i=None, target=None):
+        # how far towards a takedown (0 to 1): player i's best count on any enemy, or the team's best count on target
+        if target is not None:
+            counts = self.watch[team][:, target]
+        else:
+            counts = self.watch[team][i]
+        return float(counts.max()) / cfg.WATCH_STEPS if len(counts) else 0.0
 
     def _player_obs(self, team, i, small_searched, small_enemies):
         enemy = OTHER[team]
@@ -463,7 +456,7 @@ class GameEnv:
             mates_see = bool(np.delete(self.sees[team][:, j], i).any())
             enemies[k] = [1.0, np.cos(ang), np.sin(ang), self.dist[team][i, j] / cfg.RAY_NORM,
                           float(self.sees[team][i, j]), float(mates_see), float(not seen_team[j]),
-                          self._window_left(self.last_tag[enemy][j]), self.plant[enemy][j] / cfg.PLANT_STEPS]
+                          self.watch_progress(team, target=j), self.plant[enemy][j] / cfg.PLANT_STEPS]
 
         # teammates: those still in first, nearest first
         mates = np.zeros((cfg.MAX_TEAM_SIZE - 1, MATE_FEATURES), dtype=np.float32)
@@ -475,7 +468,7 @@ class GameEnv:
             rel = self.pos[team][k] - me
             ang = np.arctan2(rel[1], rel[0]) - heading
             mates[slot] = [1.0, np.cos(ang), np.sin(ang), np.hypot(*rel) / cfg.RAY_NORM,
-                           self._window_left(self.last_tag[team][k]), self.plant[team][k] / cfg.PLANT_STEPS,
+                           self.watch_progress(team, i=k), self.plant[team][k] / cfg.PLANT_STEPS,
                            float(self.sees[team][k].any())]
 
         # extra numbers
@@ -488,7 +481,7 @@ class GameEnv:
             self.t / cfg.MAX_STEPS,
             float(self.t < cfg.SETUP_STEPS),
             float(self.running[team][i]),
-            self._window_left(self.last_tag[team][i]),
+            self.watch_progress(team, i=i),
             self.plant[team][i] / cfg.PLANT_STEPS,
             self.plant["attackers"].max() / cfg.PLANT_STEPS,
             float(self.on_site(me)),

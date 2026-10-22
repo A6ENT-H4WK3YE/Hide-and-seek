@@ -3,12 +3,12 @@
 # They only use what a real team could know: what anyone on their team sees or hears (team callouts), plus a plan.
 #
 #   attacker bots: each round the team picks one site at random and both go there together (like a CS "execute").
-#                  If the team knows where an enemy is, they fight it: turn to it, close in to tag range and keep it
-#                  in front of them (both need to tag it). On a site with no enemy known, they stand still and plant.
-#                  Once the spike is down they guard it (stay near it, looking around).
-#   defender bots: each picks a site at random and holds it: walk to a spot on the site, then stand and look around.
-#                  If the team knows where an attacker is, they go for it together. Once the spike is down they
-#                  retake: go to it and defuse, fighting any attacker that comes close.
+#                  A bot that sees an enemy stops and keeps its aim on it (that is how players are taken out); if the
+#                  team only knows where an enemy is, the bot walks towards it quietly. On a site with no enemy known
+#                  they stand still and plant; once the spike is down they guard it (stay near it, looking around).
+#   defender bots: the team picks one site at random and both hold it: walk to a spot on it, stand and look around.
+#                  They fight like the attackers. Once the spike is down they retake together: go to it and defuse,
+#                  stopping only to hold their aim on an attacker they can see.
 # Routes are planned on the grid of map cells underneath, then followed by turning and walking. They run while
 # travelling far and walk (silently) once close to where they are going.
 #
@@ -40,8 +40,9 @@ class Bots:
         site = self.rng.choice(sorted(self.site_cells))          # the attackers' site for this round
         self.goal = {
             "attackers": [self._pick(site) for _ in range(env.n["attackers"])],
-            "defenders": [self._pick(self.rng.choice(sorted(self.site_cells))) for _ in range(env.n["defenders"])],
         }
+        site = self.rng.choice(sorted(self.site_cells))          # the defenders hold one site together
+        self.goal["defenders"] = [self._pick(site) for _ in range(env.n["defenders"])]
 
     def _pick(self, site):
         y, x = self.site_cells[site][self.rng.integers(len(self.site_cells[site]))]
@@ -89,21 +90,23 @@ class Bots:
             if not env.alive[team][i]:
                 out.append([0, NO_TURN, 0])
                 continue
-            nearest = min(known, key=lambda j: env.dist[team][i, j]) if known else None
-            # after the plant, defenders head for the spike unless an attacker is close
-            retake = (team == "defenders" and env.spike is not None
-                      and (nearest is None or env.dist[team][i, nearest] > 2 * cfg.TAG_RANGE))
-            if nearest is not None and not retake:
-                # fight the nearest known enemy: face it, close in to tag range, then hold it in front
-                j = nearest
+            seen = [j for j in known if env.sees[team][i, j]]
+            # after the plant, defenders head for the spike unless they can see an attacker right now
+            retake = team == "defenders" and env.spike is not None and not seen
+            if seen:
+                # an enemy in view: stand still and keep the aim on it until it is out
+                j = min(seen, key=lambda j: env.dist[team][i, j])
                 target = env.pos[enemy][j]
-                d = env.dist[team][i, j]
                 turn = self._turn_towards(heading, np.arctan2(target[1] - pos[1], target[0] - pos[0]))
-                want = self._route(pos, target)
-                close_in = d > 0.7 * cfg.TAG_RANGE or not env.sees[team][i, j]
+                out.append([0, turn, self._switch(running, False)])
+                continue
+            if known and not retake:
+                # the team knows where an enemy is: walk towards it quietly, looking where it is going
+                j = min(known, key=lambda j: env.dist[team][i, j])
+                want = self._route(pos, env.pos[enemy][j])
+                turn = self._turn_towards(heading, want)
                 facing = abs(wrap_angle(want - (heading + TURNS[turn]))) < np.radians(50)
-                move = 1 if close_in and facing else 0
-                out.append([move, turn, self._switch(running, d > QUIET_DISTANCE)])
+                out.append([1 if facing else 0, turn, self._switch(running, False)])
                 continue
             goal = self.goal[team][i] if env.spike is None else env.spike
             far = np.hypot(*(goal - pos))

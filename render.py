@@ -1,12 +1,13 @@
-# Draw the game as images and save GIFs: walls, sites, vision cones, players and where they look, tags, the spike,
+# Draw the game as images and save GIFs: walls, sites, vision cones, players and where they look, who is being
+# watched (and how close to being taken out), the spike,
 # and sound: a running (or planting / defusing) player gets a dashed ring plus a faint dotted circle showing how far
 # the noise carries, and a yellow dotted line joins every player to the enemy noise it hears.
 #
 #   frame = draw_frame(env)            -> RGB numpy array of the current state
 #   save_gif(frames, "runs/demo.gif")  -> save a list of frames as an animated GIF (3 frames per second)
 #
-# Colours: attackers red, defenders blue. An orange ring = tagged recently (one more tag from a different enemy
-# within the window and that player is out). Grey X = out. The spike is a yellow star.
+# Colours: attackers red, defenders blue. An orange ring = an enemy has this player in its sights; the thicker the
+# ring, the closer it is to being taken out. Grey X = out. The spike is a yellow star.
 
 import numpy as np
 import matplotlib
@@ -25,7 +26,7 @@ DEFENDER_SPAWN = np.array([210, 220, 228]) / 255
 COLOUR = {"attackers": "#c0392b", "defenders": "#2563b0"}
 VIEW = {"attackers": np.array([220, 70, 60]) / 255, "defenders": np.array([60, 120, 220]) / 255}
 SOUND_COL = "#e0b000"     # noise: hearing range circles and "who hears whom" lines
-TAG_COL = "#ff8c00"       # tagged recently
+WATCHED_COL = "#ff8c00"   # being watched (kept in an enemy's sights)
 BG = "#14161c"
 
 
@@ -87,7 +88,7 @@ def draw_frame(env, show_vision=True):
                    edgecolors="black", linewidths=0.8, zorder=5)
 
     # players: a circle the size of their body and a short line showing where they look; dashed ring = noisy,
-    # orange ring = tagged recently, grey X = out
+    # orange ring = being watched (thicker = closer to being taken out), grey X = out
     r = cfg.AGENT_RADIUS
     for team in TEAMS:
         for i, (p, h) in enumerate(zip(env.pos[team], env.heading[team])):
@@ -97,8 +98,10 @@ def draw_frame(env, show_vision=True):
             if env.noisy[team][i]:
                 ax.add_patch(Circle((p[0], p[1]), 2.5 * r, fill=False, edgecolor=COLOUR[team], linestyle="--",
                                     linewidth=1.0, zorder=3))
-            if env._window_left(env.last_tag[team][i]) > 0:
-                ax.add_patch(Circle((p[0], p[1]), 1.6 * r, fill=False, edgecolor=TAG_COL, linewidth=2.0, zorder=4))
+            danger = env.watch_progress(OTHER[team], target=i)
+            if danger > 0:
+                ax.add_patch(Circle((p[0], p[1]), 1.6 * r, fill=False, edgecolor=WATCHED_COL, linewidth=0.5 + 3.5 * danger,
+                                    zorder=4))
             ax.add_patch(Circle((p[0], p[1]), r, facecolor=COLOUR[team], edgecolor="white", linewidth=1.0, zorder=4))
             ax.plot([p[0], p[0] + 2.2 * r * np.cos(h)], [p[1], p[1] + 2.2 * r * np.sin(h)],
                     color="white", linewidth=1.4, zorder=5)

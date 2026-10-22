@@ -5,9 +5,32 @@ time, the game moves on according to their joint action, and each agent only see
 is going on. This file says exactly which game each version is. `GAME_VERSION` in `config.py`
 points to a section here, and every training run's `run_card.md` records it.
 
+## v4.1: taking players out by keeping them in your sights, on a balanced two-site map
+
+The current version: v4 (below) with two changes, both from Moeez's feedback on the first v4 design.
+- **Keep them in your sights instead of tags.** A player is out once an enemy has kept them in sight, within 30 degrees
+  of where it looks (roughly "crosshair on them"), for **10 steps in a row** (about 10 seconds). Any step without them
+  in view restarts that count. Whoever starts watching first finishes first, so holding an angle beats running in blind;
+  players finishing on the same step (for example two players watching each other from the same moment) are settled by
+  a coin flip, and a player taken out earlier in that step does not get its own takedown. Each watcher counts on its own.
+  No takedowns during setup. This replaces the tag rules (two different enemies within 8 steps) and their edge cases,
+  and rewards awareness of your surroundings. Tag reward removed; takedown +10 stays.
+  Why 30 degrees and not the whole 90 degree cone: it makes aim and tracking matter, not only position.
+- **New map `maps/two_sites.txt`**, two sites instead of three (two defenders cannot cover three sites), mirror
+  symmetric so A and B are equally fair, and no line of sight from one spawn to the other (0 of 972 spawn cell pairs;
+  the old layout had a straight mid corridor between the spawns, and vision has no range limit). Mid is reached through
+  side doors from each spawn; each site has a long outer lane, a lower-mid route and a mid door, and mid links the two
+  sites. Walking distance to a site: defenders 12, attackers 22; A to B rotation 20.
+- **Spike 40 -> 50 steps**, so a retake from the other site (20 steps away) plus a defuse (7) is possible.
+- **Bots:** defenders now hold one site together; a bot that sees an enemy stops and keeps its aim on it; a bot whose
+  team only knows where an enemy is walks towards it quietly. Bots v bots on the new map: attackers win 51%, spike
+  planted 71%, defused 31%, takedowns per round 0.43 by attackers and 1.66 by defenders (holding an angle wins fights,
+  attackers win through the objective).
+- The first v4 run (three sites, tags) was stopped at 300k steps after Moeez's feedback; attackers had never planted.
+
 ## v4: attack and defend (Valorant / CS style), with tags instead of guns
 
-The current version. A new game built on everything v1 to v3.5 developed (continuous movement, 90 degree vision cones,
+Superseded by v4.1 above (tags replaced, new map); everything else below still holds. A new game built on everything v1 to v3.5 developed (continuous movement, 90 degree vision cones,
 rays, sound through walls, walk / run, learned memory, the opponent pool, parallel training). The hide-and-seek game
 (v1 to v3.5) is kept in git under the tag `v3.5-hide-and-seek`; its sections and results are further down.
 

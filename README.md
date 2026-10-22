@@ -1,8 +1,8 @@
 # Hide and Seek MARL (now: attack and defend)
 
-An FPS-style team game (Valorant / CS style, with short-range "tags" instead of guns), trained with multi-agent reinforcement learning.
+An FPS-style team game (Valorant / CS style, without guns: you take an enemy out by keeping them in your sights), trained with multi-agent reinforcement learning.
 
-Two teams of two on a map with three bomb sites, in continuous space. Attackers try to plant the spike on a site and defend it until it explodes; defenders hold the sites, retake and defuse. Every player sees only a 90 degree vision cone, hears enemies who run, plant or defuse nearby (even through walls), and shares what it knows with its teammate. Taking someone out needs two teammates: a player is out once tagged by two different enemies within a few seconds.
+Two teams of two on a map with two bomb sites, in continuous space. Attackers try to plant the spike on a site and defend it until it explodes; defenders hold the sites, retake and defuse. Every player sees only a 90 degree vision cone, hears enemies who run, plant or defuse nearby (even through walls), and shares what it knows with its teammate. A player is out once an enemy keeps them in its sights for 10 seconds in a row, so whoever spots the other first and holds the angle wins the fight.
 
 The project started as hide and seek (v1 to v3.5); that game is kept in git under the tag `v3.5-hide-and-seek`, and what it taught us is summarised below.
 
@@ -10,25 +10,25 @@ The project started as hide and seek (v1 to v3.5); that game is kept in git unde
 
 Recreate as much of an FPS game as possible, train agents on it with multi-agent RL, and study what they learn: tactics, teamwork and emergent behaviour. The model moves step by step towards being fully continuous (continuous space now, continuous time later, possibly learned dynamics such as neural ODEs), and the end point is a 3D render of the agents playing.
 
-## The game (v4)
+## The game (v4.1)
 
 - **Map:** loaded from a text file; every `#` is a solid 1 x 1 square. Players are circles (radius 0.3) with a position and a heading, and slide along walls.
 - **Actions:** every step, a move (stay, forward, back, strafe left, strafe right), a turn (-90 to +90 degrees) and whether to switch between walking and running. Running is full speed but makes noise; walking is half speed and silent. Every round starts walking.
 - **Vision:** a 90 degree cone, no range limit, blocked by walls. You can see someone's back without being seen.
 - **Sound:** running, planting and defusing are heard by enemies within a quarter of the map's size (about 11 cells), through walls.
-- **Tags:** an enemy in sight, within 3 units and within 20 degrees of where you look gets tagged. One tag only marks them; tags from two different enemies within 8 steps take them out. A lone survivor cannot take anyone out alone.
-- **Round:** 250 steps; attackers are frozen for the first 30 (setup). An attacker standing still on a site for 5 steps plants the spike; it explodes 40 steps later unless a defender defuses it (standing still next to it for 7 steps).
+- **Taking someone out:** keep an enemy in sight, within 30 degrees of where you look, for 10 steps in a row (any break restarts the count). Whoever started watching first finishes first; same-step finishes, like two players watching each other from the same moment, are a coin flip.
+- **Round:** 250 steps; attackers are frozen for the first 30 (setup). An attacker standing still on a site for 5 steps plants the spike; it explodes 50 steps later unless a defender defuses it (standing still next to it for 7 steps).
 - **Winning:** attackers win if the spike explodes or every defender is out; defenders win by defusing, by taking every attacker out before the plant, or when time runs out before a plant.
-- **Rewards (zero-sum):** +2 per tag, +10 per takedown, +5 for the plant, +20 / -20 for the round, plus a small potential-based shaping term that guides attackers towards the sites without changing which strategies are best.
+- **Rewards (zero-sum):** +10 per takedown, +5 for the plant, +20 / -20 for the round, plus a small potential-based shaping term that guides attackers towards the sites without changing which strategies are best.
 
 Full rules, and the reasoning behind every choice, are in `formulation.md`.
 
 ## What each player knows
 
 - **Rays:** 31 rays across its cone, each saying how far it reaches and whether it hit a wall, a teammate or an enemy.
-- **Enemies:** every enemy its team sees or hears right now (team callouts): direction, distance, whether I see it, whether a teammate does, whether it was only heard, whether my team tagged it recently, whether it is planting.
-- **Teammates:** direction, distance, tagged recently, planting, sees an enemy.
-- **Numbers:** position, heading, time, setup phase, running, tagged recently, plant progress, the spike (down, time left, direction, distance, defuse progress), players left on each team.
+- **Enemies:** every enemy its team sees or hears right now (team callouts): direction, distance, whether I see it, whether a teammate does, whether it was only heard, how far my team is towards taking it out, whether it is planting.
+- **Teammates:** direction, distance, how far it is towards taking an enemy out, planting, sees an enemy.
+- **Numbers:** position, heading, time, setup phase, running, my own progress towards a takedown, plant progress, the spike (down, time left, direction, distance, defuse progress), players left on each team.
 - **Minimap:** the whole map shrunk to 12 x 12: walls, sites, itself, teammates, where its team searched recently, where its team last saw or heard enemies.
 - **Memory:** both teams have a learned memory (a GRU) carried through each round.
 
@@ -40,7 +40,7 @@ Full rules, and the reasoning behind every choice, are in `formulation.md`.
 
 ```
 pip install -r requirements.txt               # plus torch (see setup notes)
-python test_env.py                            # check the rules (59 checks, should say: all checks passed)
+python test_env.py                            # check the rules (56 checks, should say: all checks passed)
 python random_demo.py                         # bots v bots: one GIF plus win rates
 caffeinate -i python train.py smoke 20000     # quick check that training runs
 caffeinate -i python train.py                 # full run (TOTAL_STEPS in config.py)
@@ -49,7 +49,7 @@ python evaluate.py runs/<run name>/checkpoints/latest.pt
 
 Each run gets its own folder in `runs/` with a `run_card.md` (every setting, game version, git commit), `metrics.csv`, `curves.png`, `bots.csv`, recorded GIFs and checkpoints. Ctrl+C stops training early and still saves.
 
-**Reading the GIFs:** attackers are red, defenders blue. Shaded wedges are vision cones; dashed lines show who sees whom. A dashed ring means the player made noise; the faint dotted circle shows how far it carries, and a yellow dotted line joins every player to the enemy noise it hears. An orange ring means tagged recently, a grey X means out, and the yellow star is the spike. GIFs play at 3 frames per second.
+**Reading the GIFs:** attackers are red, defenders blue. Shaded wedges are vision cones; dashed lines show who sees whom. A dashed ring means the player made noise; the faint dotted circle shows how far it carries, and a yellow dotted line joins every player to the enemy noise it hears. An orange ring means an enemy has that player in its sights (the thicker, the closer to being taken out), a grey X means out, and the yellow star is the spike. GIFs play at 3 frames per second.
 
 ## Progress
 
@@ -61,7 +61,8 @@ Each run gets its own folder in `runs/` with a `run_card.md` (every setting, gam
 | big map | `three_sites.txt` (3 sites, mid, lanes), 250-step rounds | done, the default |
 | v3 to v3.2 | walk or run, footsteps heard through walls, walk / run as a mode you switch | done |
 | v3.3 to v3.5 | hiders retrained, team search memory of a minute, learned memory (GRU), league training against a cheating escape bot | done (tag `v3.5-hide-and-seek`) |
-| **v4** | attack and defend: two-tag takedowns, the spike (plant, explode, defuse), team callouts, memory for both teams, bots as training opponents | **current**, training |
+| v4 | attack and defend: two-tag takedowns, the spike (plant, explode, defuse), team callouts, memory for both teams, bots as training opponents | replaced by v4.1 |
+| **v4.1** | takedowns by keeping an enemy in your sights for 10 steps; balanced, mirror-symmetric two-site map with no spawn-to-spawn sightlines | **current**, training |
 
 Next: watch what v4 learns (rotations, trades, retakes), then bigger teams towards 5v5, continuous turning, communication between teammates, continuous time, and a 3D render.
 
@@ -89,7 +90,8 @@ Hide-and-seek results (seekers' win rate, 300 games per matchup; "chaser" and "f
 
 Maps are plain text files in `maps/`: `#` wall, `.` floor, `h` defender spawn, `s` attacker spawn, `A` `B` `C` site cells. `python preview_map.py maps/three_sites.txt` draws a map and checks every walkable cell is reachable.
 
-- **`three_sites.txt`** (45 x 31): three sites, a mid room, two long lanes, rotation links and cover boxes. Defenders spawn at the top, attackers at the bottom. The default map.
+- **`two_sites.txt`** (45 x 31): the default. Two sites, mirror symmetric, a mid room linking both sites, side doors into mid from each spawn (the spawns cannot see each other), outer lanes and a lower-mid route. Defenders spawn at the top (12 steps from a site), attackers at the bottom (22 steps).
+- **`three_sites.txt`** (45 x 31): the older three-site layout used for hide and seek and the first v4 run.
 - **`tiny.txt`** (11 x 11): small debugging map from the hide-and-seek days (it has no sites).
 
 ## Repo layout

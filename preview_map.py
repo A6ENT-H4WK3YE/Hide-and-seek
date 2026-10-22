@@ -60,7 +60,7 @@ for y in range(H):
                                edgecolor="#14161c", linewidth=0.3))
 
 # label each site and spawn zone at its centre
-labels = {"A": "A", "B": "B", "C": "C", "h": "HIDERS", "s": "SEEKERS"}
+labels = {"A": "A", "B": "B", "C": "C", "h": "DEFENDERS", "s": "ATTACKERS"}
 for ch, text in labels.items():
     cells = np.argwhere(grid == ch)
     if len(cells):

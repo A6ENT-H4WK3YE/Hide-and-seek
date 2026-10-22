@@ -4,13 +4,13 @@
 # Matches a section in formulation.md. Bump it whenever the game rules change
 # (vision cone -> "v2", sound -> "v3", attack / defend -> "v4", ...) so every run card says which game it trained on.
 # The hide-and-seek game (v1 to v3.5) is kept in git under the tag v3.5-hide-and-seek.
-GAME_VERSION = "v4"
+GAME_VERSION = "v4.1"
 
 # ---------- map ----------
 # Maps are text files in maps/:  '#' wall, '.' floor, 'h' defender spawn cell (top),
 # 's' attacker spawn cell (bottom), 'A' 'B' 'C' site cells (every non-'#' cell is walkable)
 # Every '#' cell becomes a solid 1 x 1 square; agents move freely (continuously) on the rest.
-MAP_FILE = "maps/three_sites.txt"
+MAP_FILE = "maps/two_sites.txt"     # v4.1: two sites (three_sites.txt has three; with 2 defenders that was too many)
 FIXED_EVAL_SEED = 0     # same spawns for every recorded GIF, for fair comparison
 
 # ---------- teams ----------
@@ -36,15 +36,13 @@ N_RAYS = 31             # rays spread evenly across the cone (one every 3 degree
 RAY_NORM = 20.0         # distances in observations are divided by this (keeps the numbers near 0 to 1)
 MEMORY_DECAY = 0.97     # how fast the team's "last known enemy position" marks fade each step (about 30 steps)
 
-# ---------- tags (the short-range "shot") ----------
-# A tag is like a shot at close range: the enemy must be in sight, within TAG_RANGE and within TAG_ANGLE of where
-# you look. One tag does not take a player out: it marks them for TAG_WINDOW steps. A player is OUT when tagged by
-# TAGS_TO_OUT DIFFERENT enemies within that window. So taking someone out needs two teammates working together
-# (one keeps a tail and calls it in, the other closes in), and a lone survivor cannot take anyone out on his own.
-TAG_RANGE = 3.0
-TAG_ANGLE = 20
-TAG_WINDOW = 8
-TAGS_TO_OUT = 2         # capped at the enemy team's size, so 1v1 still works
+# ---------- taking someone out: keep them in your sights (v4.1, Moeez's rule) ----------
+# A player is OUT once an enemy has kept them in sight, within WATCH_ANGLE of where it looks (roughly "crosshair on
+# them"), for WATCH_STEPS steps in a row. Any step without them in view restarts that count. Whoever starts watching
+# first finishes first, so holding an angle beats running in blind, as in Valorant; if two players finish on the same
+# step (for example watching each other), a coin flip decides who goes out. Each watcher counts on its own.
+WATCH_STEPS = 10        # about 10 seconds
+WATCH_ANGLE = 30        # degrees either side of where the watcher looks (inside the 90 degree vision cone)
 
 # ---------- objective (Valorant's spike) ----------
 # An attacker standing still on a site cell plants; PLANT_STEPS steps in a row (moving, being out or the setup phase
@@ -53,7 +51,8 @@ TAGS_TO_OUT = 2         # capped at the enemy team's size, so 1v1 still works
 # spike for DEFUSE_STEPS in a row). Taking out every attacker after the plant does not win on its own: the spike
 # still has to be defused (as in Valorant). Planting and defusing make noise. Everyone knows where a planted spike is.
 PLANT_STEPS = 5
-SPIKE_STEPS = 40        # long enough for defenders on another site to run over and retake (about 30 steps away)
+SPIKE_STEPS = 50        # long enough for defenders on the other site to run over and retake (bots: 40 -> attackers
+                        # 66%, 50 -> 57% on two_sites)
 DEFUSE_STEPS = 7
 DEFUSE_RANGE = 1.0
 
@@ -67,8 +66,8 @@ MINIMAP_SIZE = 12         # the whole map is shrunk to MINIMAP_SIZE x MINIMAP_SI
 
 # ---------- rewards ----------
 # Written from the attackers' side; defenders always get exactly minus this (zero-sum), shared by the whole team.
-# Only real game events count, plus one shaping term that provably cannot change the best strategy (see below).
-REWARD_TAG = 2.0        # each new tag on an enemy (like damage dealt); re-tagging inside the window pays nothing
+# Only real game events count (takedowns, the plant, the round), plus one shaping term that provably cannot change the
+# best strategy (see below).
 REWARD_OUT = 10.0       # each enemy taken out
 REWARD_PLANT = 5.0      # the spike goes down (a real milestone of the round, like a tag)
 REWARD_WIN = 20.0       # round won (spike explodes or every defender out; for defenders: defuse, every attacker out

@@ -4,43 +4,44 @@ Read this first. It is the project memory: what we are building, what has happen
 what comes next, and how Moeez wants to work. Keep it up to date when decisions are made or results come in.
 The exact rules of every game version are in `formulation.md`; this file is the story and the state of play.
 
-## Where we left off (2026-10-22)
+## Where we left off (2026-10-22, early morning)
 
-- **The project is now v4: a 2v2 attack / defend game (Valorant / CS style)**, not hide and seek. Hide and seek (v1 to
-  v3.5) is kept under the git tag `v3.5-hide-and-seek`. Branch `main`.
-- Moeez asked for a complete, reasoned v4 design in one go ("think it yourself, don't ask me, make the rules and rewards
-  and everything"), starting from his ideas: tags that need two teammates, an operator tagged twice is out, a lone
-  survivor cannot take anyone out, and the end goal of teams going to a site to do an objective while the others defend.
-  The full rules and the reasoning are in formulation.md (v4 section); the design summary is below.
-- **v4 run started: 10M steps, both teams from scratch**, run name `v4_three_sites_2v2_*`. About 1,100 steps/s (about
-  2h45). Smoke run fine (all 59 checks pass).
-- After the run: evaluate.py (trained v random / bots / each other, plants, defuses, takedowns per round), watch GIFs,
-  and measure behaviour: do attackers group up and hit a site together, do defenders stack or spread and rotate on
-  sound, do they trade (two tags inside the window), do retakes happen, who plants where, walk / run use.
-- Ideas kept for later (not built): bigger teams towards 5v5; continuous turning; communication between teammates;
-  aim reward (keep the target centred); sharper minimap; parallel bot benchmarks.
-- **Always start runs with `caffeinate -i`, smoke runs and evaluations too.**
-- A smoke run once stalled for 15 minutes before the first update and could not be reproduced (the rerun was fine).
-  If a run shows no update line within about 3 minutes, check it with `python -u` (unbuffered output).
+- **Game version v4.1** (attack / defend, 2v2) on the new map `maps/two_sites.txt`. Hide and seek (v1 to v3.5) is kept
+  under the git tag `v3.5-hide-and-seek`. Branch `main`.
+- v4.1 = v4 with Moeez's two changes: (1) a player is out after being kept in an enemy's sights (in view, within 30
+  degrees of where it looks) for 10 steps in a row; whoever starts first finishes first; same-step finishes are a coin
+  flip. This replaced the two-tag rule. (2) A balanced map: two sites, mirror symmetric, no spawn-to-spawn sightlines
+  (the old mid corridor joined the spawns), mid reached through side doors. Spike 40 -> 50 steps for retakes.
+- Bots v bots on the new map: attackers 51%, planted 71%, defused 31%; takedowns 0.43 by attackers, 1.66 by defenders.
+- **v4.1 run started: 10M steps, both teams from scratch**, about 800 steps/s (about 3.5 hours), run name
+  `v4.1_two_sites_2v2_*`. The first v4 run (three sites, tags) was stopped at 300k steps (attackers had never planted).
+- After the run: evaluate.py, GIFs (orange ring = being watched), and behaviour: which site attackers hit, do they go
+  together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
+- Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.
+- **Always start runs with `caffeinate -i`, smoke runs and evaluations too.** Use `python -u` so progress shows.
 
 ## v4 design summary (2026-10-22, details and reasons in formulation.md)
 
+- Map (v4.1): `maps/two_sites.txt`, mirror symmetric, no spawn-to-spawn sightlines; defenders 12 steps from a site,
+  attackers 22, rotation A to B 20.
 - Teams: 2 attackers (spawn bottom, `s`) v 2 defenders (spawn top next to the sites, `h`); one network per team, both
   with memory (GRU). 250-step rounds, 30-step setup (attackers frozen, no tags).
-- Tag = enemy in sight, within 3 units, within 20 degrees of where you look. Out = tagged by 2 different enemies within
-  8 steps (capped at the enemy team size, so 1v1 works). Lone survivors cannot take anyone out alone.
-- Spike: stand still on a site cell 5 steps to plant; it explodes after 40 steps; defenders defuse by standing still
+- (v4.1) Out = kept in an enemy's sights (in view, within 30 degrees of where it looks) for 10 steps in a row; whoever
+  starts first finishes first; same-step finishes are a coin flip. (v4 used tags needing 2 different enemies within
+  8 steps; replaced at Moeez's request: the edge cases felt odd, and awareness should decide fights.)
+- Spike: stand still on a site cell 5 steps to plant; it explodes after 50 steps (v4: 40); defenders defuse by standing still
   within 1 unit for 7 steps. Round timer stops at the plant; after the plant, a wipe of the attackers does not win, the
   spike must be defused. Plant-equals-win was tried first: bots v bots gave attackers 78% (race to an empty site);
   with retakes 64%.
-- Rewards (zero-sum, attackers' side): tag +2, takedown +10, plant +5, win +20; potential-based site shaping for
+- Rewards (zero-sum, attackers' side): takedown +10, plant +5, win +20 (v4 also had tag +2); potential-based site shaping for
   attackers (cannot change the best strategies). No seen / unseen, distance or exploration rewards.
 - Observations: rays; enemies known to the team (seen or heard by anyone, team callouts) with flags; teammates;
   20 numbers incl. the spike; minimap with sites, team search memory and team enemy memory.
 - Training: PPO, discount 0.997; memory learned in 32-step pieces (checked to replay play exactly); 20% of games one
   team is played by the bots (`BOT_TEAM_PROB`), half of the rest one team is a past version (pool over the whole run).
-- Bots (`bots.py`): attackers pick one site and go together, fight anything known, plant, guard; defenders hold random
-  sites, go for known attackers together, retake. Bots v bots: attackers 63 to 66%; random attackers never plant.
+- Bots (`bots.py`): attackers pick one site and go together; defenders hold one site together; a bot that sees an enemy
+  stops and keeps its aim on it, one whose team only knows where an enemy is walks towards it quietly; attackers plant
+  and guard, defenders retake. Bots v bots (two_sites): attackers 51%.
 
 ## Who you are working with
 
@@ -122,11 +123,11 @@ workers.py      runs the training games in parallel processes (one per CPU core)
 evaluate.py     plays a checkpoint against random players and the bots
 bots.py         scripted attackers and defenders (benchmarks, and one team in BOT_TEAM_PROB of training games)
 matches.py      plays any mix of trained / bot / random players
-test_env.py     59 rule checks for v4 (must say "all checks passed")
+test_env.py     56 rule checks for v4.1 (must say "all checks passed")
 random_demo.py  bots or random players: one GIF plus win rates and speed
 preview_map.py  draws a map file to PNG and checks it is fully connected (note: it overwrites the tracked preview PNG)
 formulation.md  the exact game definition per version, changelog and experiment notes
-maps/           tiny.txt (11 x 11, debugging), three_sites.txt (45 x 31, FPS-style, 3 sites)
+maps/           two_sites.txt (45 x 31, the default, symmetric), three_sites.txt (older, 3 sites), tiny.txt (debugging)
 runs/           training outputs, ignored by git (run_card.md, metrics.csv, curves.png, bots.csv, gifs/, checkpoints/,
                 and for analysed runs behaviour_heatmaps.png)
 ```
@@ -164,6 +165,7 @@ three_sites) through walls.
 | (league) | escape bot in 25% of training games; discount 0.99 -> 0.997 (training only) | v3.5 seekers caught the cheating escape bot only 27% (chaser bots 71%); hiders could not feel a win 250 steps away |
 | (speed) | games in 16 parallel worker processes | training was slow; the game was the bottleneck, not the network |
 | (speed) | ray casting compiled with numba, identical results | profiling showed rays were 88% of each game step |
+| v4.1 | out after 10 steps in an enemy's sights (replaces tags); balanced symmetric two-site map with no spawn-to-spawn sightlines; spike 50 | Moeez: tags felt odd and awareness should decide fights; three sites were too many for two defenders, and the spawns could see each other |
 | **v4** | new game: 2v2 attack / defend, two-tag takedowns, the spike (plant, explode, defuse), team callouts, memory for both teams, bots as training opponents, memory learned in 32-step pieces | Moeez: the end goal is Valorant-like team play; hide and seek kept hitting the same walls. He asked for a complete design in one go |
 | v3.2 | sound goes through walls; range = 0.25 x the map's longer side (11.25 on three_sites) | Moeez: with 6 cells of walking distance sound almost never reached anyone, so hiders had no idea where seekers were |
 | v3.3 | hiders pay 0.02 per noisy step; only hiders learn, against frozen v3.2 seekers (final + 17 checkpoints as pool); switch starts at 95% "keep" (all together, agreed) | v3.2 seekers won 98%; hiders flipped walk / run constantly and were heard through walls. Moeez: fix the hiders first |
