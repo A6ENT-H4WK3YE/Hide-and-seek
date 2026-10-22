@@ -21,6 +21,10 @@ The exact rules of every game version are in `formulation.md`; this file is the 
   The first v4 run (three sites, tags) was stopped at 300k steps (attackers had never planted).
 - The first 30M run was stopped at 2M steps: attackers stayed home (never on a site, "stay" 53%), no plants, no
   takedowns. Restarted from scratch with takedown reward 10 -> 2 and site shaping 1 -> 5 (see formulation.md).
+- That restart also stalled (2.4M: attackers reach lower mid, never a site). Shaping verified correct. Fix: imitation
+  pretraining (`pretrain.py`, about 10 minutes): both networks first copy the scripted bots, then self-play continues
+  (`START_FROM = runs/pretrain/bc.pt`). Copied attackers plant 6 to 16% of rounds (0% from scratch).
+- **Current: 30M run from the copied networks**, watched every 40 to 45 minutes.
 - After the run: evaluate.py, GIFs (orange ring = being watched), and behaviour: which site attackers hit, do they go
   together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
 - Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.
@@ -131,6 +135,7 @@ bots.py         scripted attackers and defenders (benchmarks, and one team in BO
 matches.py      plays any mix of trained / bot / random players
 test_env.py     56 rule checks for v4.1 (must say "all checks passed")
 random_demo.py  bots or random players: one GIF plus win rates and speed
+pretrain.py     imitation pretraining: networks copy the scripted bots before self-play (runs/pretrain/bc.pt)
 preview_map.py  draws a map file to PNG and checks it is fully connected (note: it overwrites the tracked preview PNG)
 formulation.md  the exact game definition per version, changelog and experiment notes
 maps/           two_sites.txt (45 x 31, the default, symmetric), three_sites.txt (older, 3 sites), tiny.txt (debugging)

@@ -37,6 +37,14 @@ The current version: v4 (below) with two changes, both from Moeez's feedback on 
   defenders who hold angles also cost -10 per player lost, so staying home was their safest option and they never found
   the plant. Changes: takedown reward 10 -> 2 (the round is what matters; a takedown is only a means to it) and site
   shaping 1 -> 5 (still potential-based, so it still cannot change the best strategies or be farmed).
+- **The restart stalled too (2.4M steps): attackers learned to push into lower mid but never reached a site or planted.**
+  The site shaping was checked and works (a scripted walk to a site collects +5.1 v +0.8 standing still); the chain
+  "walk to a site, stand still 5 steps, win the round" is just too long to find by trying things at random.
+  **Fix: imitation pretraining (`pretrain.py`).** Each team's network first copies the scripted bots (600 bot v bot
+  games, 10% random moves executed but always labelled with the bot's choice so the copy learns to recover), then
+  self-play takes over from there (`START_FROM`). No rules or rewards change. Copies: move matches the bot 95%
+  (attackers) / 88% (defenders), turn only 46% (the bots' chosen site is hidden, so turns are partly a guess). Copied
+  attackers plant 6 to 16% of rounds (v 0% from scratch); copied v copied: attackers win 13%. The 30M run starts from these.
 
 ## v4: attack and defend (Valorant / CS style), with tags instead of guns
 

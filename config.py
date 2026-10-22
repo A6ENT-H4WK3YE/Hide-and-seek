@@ -117,7 +117,9 @@ N_WORKERS = 16          # the games run in this many parallel processes (workers
 # ---------- which teams learn ----------
 TRAIN_TEAMS = ["attackers", "defenders"]
 FROZEN_RUN = ""         # for a team not in TRAIN_TEAMS: the run whose networks it plays with
-START_FROM = {}         # {team: checkpoint path} to start a team from a saved network ({} = everyone from scratch)
+# {team: checkpoint path} to start a team from a saved network ({} = everyone from scratch). v4.1: both teams start from
+# networks that copied the scripted bots (pretrain.py), because from scratch the attackers never found the plant.
+START_FROM = {"attackers": "runs/pretrain/bc.pt", "defenders": "runs/pretrain/bc.pt"}
 MEMORY_TEAMS = ["attackers", "defenders"]   # both teams get a learned memory (GRU, see model.py)
 
 # ---------- opponent pool (stops self-play going round in circles) ----------

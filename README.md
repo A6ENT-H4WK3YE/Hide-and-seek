@@ -35,6 +35,7 @@ Full rules, and the reasoning behind every choice, are in `formulation.md`.
 ## Training
 
 - **PPO**, one network per team shared by its players, both teams learning at once (self-play), discount 0.997.
+- **Head start by imitation:** before self-play, each team's network copies the scripted bots (`pretrain.py`), so attackers already know how to walk to a site and plant. Trained from scratch, they never found the plant on their own.
 - **Opponents:** in 20% of games one team is played by the scripted bots; in half of the rest, one team is a past version of itself from an opponent pool that spans the whole run. Only current selves learn. This stops either side winning by exploiting one particular opponent.
 - **Parallel games:** the games run in 16 worker processes, ray casting is compiled with numba, and the network stays on the CPU (faster than a GPU for a network this small). About 1,100 steps per second on a 15-core Mac.
 
@@ -109,6 +110,7 @@ evaluate.py    play a checkpoint against random players and the bots
 render.py      draw frames, save GIFs
 test_env.py    checks that the game rules work
 random_demo.py bots or random players: one GIF plus win rates and speed
+pretrain.py    imitation pretraining: both teams first copy the scripted bots, then self-play takes over
 preview_map.py draw a map to PNG and check it is fully connected
 formulation.md the exact game definition for each version, changelog and experiment notes
 runs/          training outputs (ignored by git)
