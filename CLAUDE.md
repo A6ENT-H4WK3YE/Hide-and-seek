@@ -24,7 +24,10 @@ The exact rules of every game version are in `formulation.md`; this file is the 
 - That restart also stalled (2.4M: attackers reach lower mid, never a site). Shaping verified correct. Fix: imitation
   pretraining (`pretrain.py`, about 10 minutes): both networks first copy the scripted bots, then self-play continues
   (`START_FROM = runs/pretrain/bc.pt`). Copied attackers plant 6 to 16% of rounds (0% from scratch).
-- **Current: 30M run from the copied networks**, watched every 40 to 45 minutes.
+- 30M run from the copied networks: attackers took off at 2.4M (self-play 95% by 5.5M, plant 95%); defenders never
+  defused (0%) and drifted to random. Stopped at 5.5M, added **retake shaping** (after the plant the potential pulls
+  defenders to the spike and into defusing; see formulation.md), both teams **continue from the 5.5M checkpoint**
+  (`START_FROM` = that run's latest.pt) for 25M more. Watched every 45 minutes.
 - After the run: evaluate.py, GIFs (orange ring = being watched), and behaviour: which site attackers hit, do they go
   together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
 - Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.

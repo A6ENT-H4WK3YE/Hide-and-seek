@@ -334,13 +334,22 @@ class GameEnv:
         return np.array([x, y]), heading, run, noisy, bumped
 
     def _potential(self):
-        # attackers' shaping potential: minus the walking distance from the closest attacker still in to a site
-        # (0 once the spike is down: the job it helps with is done)
-        in_game = [p for p, a in zip(self.pos["attackers"], self.alive["attackers"]) if a]
-        if not in_game or self.spike is not None:
+        # Shaping potential, written from the attackers' side (defenders get minus the reward it produces).
+        # Before the plant it pulls attackers towards a site: minus the walking distance from the closest attacker
+        # still in to a site. After the plant it pulls defenders to the spike and into defusing (the retake):
+        # plus the walking distance from the closest defender still in to the spike, minus their defuse progress.
+        if self.spike is None:
+            in_game = [p for p, a in zip(self.pos["attackers"], self.alive["attackers"]) if a]
+            if not in_game:
+                return 0.0
+            d = min(self.site_dist[cell_of(p)] for p in in_game)
+            return -cfg.SITE_SHAPING * d / self.site_norm
+        in_game = [p for p, a in zip(self.pos["defenders"], self.alive["defenders"]) if a]
+        if not in_game:
             return 0.0
-        d = min(self.site_dist[cell_of(p)] for p in in_game)
-        return -cfg.SITE_SHAPING * d / self.site_norm
+        to_spike = self.path_dist[cell_of(self.spike)]
+        d = min(to_spike[cell_of(p)] for p in in_game)
+        return cfg.SITE_SHAPING * (d / self.site_norm - self.defuse.max() / cfg.DEFUSE_STEPS)
 
     # ---------- vision ----------
     def all_players(self):

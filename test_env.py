@@ -313,6 +313,22 @@ check(f"zero-sum when nobody walks into a wall, shaping included: attackers {r['
 # ======================================================================
 # observations and team information
 # ======================================================================
+# retake shaping: after the plant, the potential pulls defenders to the spike and into defusing
+place(env, att=[(4.5, 3.5, 0), (11.5, 2.5, 0)], dfn=[(11.5, 4.5, 180), (11.5, 1.5, 180)])
+for _ in range(cfg.PLANT_STEPS):
+    act(env)
+env.alive["attackers"][:] = False             # (no attackers around, so nobody gets taken out)
+env._update_sight()
+_, r, _, info, shaping = act(env, dfn=[FORWARD, STAY])   # the defender closest to the spike takes one step towards it
+expected = cfg.SITE_SHAPING / env.site_norm
+check(f"after the plant, the closest defender stepping towards the spike is rewarded (defenders {r['defenders'][0]:+.3f}, "
+      f"about {expected:.2f} per cell)", r["defenders"][0] > 0.8 * expected)
+env.pos["defenders"][0] = env.spike + [0.5, 0.0]
+env._update_sight()
+env.potential = env._potential()
+_, r, _, info, shaping = act(env)
+check(f"and building up defuse progress is rewarded too (defenders {r['defenders'][0]:+.3f})", r["defenders"][0] > 0)
+
 place(env, att=[(2.5, 2.5, 0), (2.5, 1.5, 180)], dfn=[(8.5, 2.5, 0), (11.5, 4.5, 0)])
 env._update_memory()                          # what a step does after sight and hearing
 obs = env._get_obs()

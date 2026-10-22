@@ -81,7 +81,9 @@ SITE_SHAPING = 5.0      # (1.0 in the first v4.1 run, too weak to get attackers 
                         # GAMMA x new potential - old potential: going towards a site pays a little, walking away pays
                         # it back. This kind of shaping provably leaves the best strategies unchanged; it only helps
                         # attackers find the sites early in training. Defenders get minus it, like everything else
-                        # (the potential is 0 once the spike is down)
+                        # After the plant the same potential pulls DEFENDERS instead: towards the spike and into
+                        # defusing (closest defender's walking distance to the spike, and defuse progress), because
+                        # defenders that never managed a defuse by chance never learned that a retake pays
 
 # ---------- actions ----------
 # every step each agent picks three things at once:
@@ -96,7 +98,7 @@ SWITCH_KEEP_PROB = 0.95 # an untrained network presses "keep" this often (switch
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
-TOTAL_STEPS = 30_000_000  # total environment steps across all parallel games (a long run, from scratch)
+TOTAL_STEPS = 25_000_000  # total environment steps (25M more after the first 5.5M, about 30M in all)
 N_ENVS = 16             # games played in parallel (one network call covers all of them)
 ROLLOUT_STEPS = 128     # steps per game collected before each update (16 x 128 = 2048 per update)
 LEARNING_RATE = 3e-4
@@ -119,7 +121,10 @@ TRAIN_TEAMS = ["attackers", "defenders"]
 FROZEN_RUN = ""         # for a team not in TRAIN_TEAMS: the run whose networks it plays with
 # {team: checkpoint path} to start a team from a saved network ({} = everyone from scratch). v4.1: both teams start from
 # networks that copied the scripted bots (pretrain.py), because from scratch the attackers never found the plant.
-START_FROM = {"attackers": "runs/pretrain/bc.pt", "defenders": "runs/pretrain/bc.pt"}
+# Continued from the first 5.5M steps of the run that started from them (attackers had learned to plant; defenders
+# had not learned to retake, so the retake shaping was added and both teams carry on from where they were).
+START_FROM = {"attackers": "runs/v4.1_two_sites_2v2_20261022_105426/checkpoints/latest.pt",
+              "defenders": "runs/v4.1_two_sites_2v2_20261022_105426/checkpoints/latest.pt"}
 MEMORY_TEAMS = ["attackers", "defenders"]   # both teams get a learned memory (GRU, see model.py)
 
 # ---------- opponent pool (stops self-play going round in circles) ----------

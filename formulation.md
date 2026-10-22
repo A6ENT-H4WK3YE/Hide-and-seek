@@ -45,6 +45,13 @@ The current version: v4 (below) with two changes, both from Moeez's feedback on 
   self-play takes over from there (`START_FROM`). No rules or rewards change. Copies: move matches the bot 95%
   (attackers) / 88% (defenders), turn only 46% (the bots' chosen site is hidden, so turns are partly a guess). Copied
   attackers plant 6 to 16% of rounds (v 0% from scratch); copied v copied: attackers win 13%. The 30M run starts from these.
+- **From the copied networks, attackers took off at about 2.4M steps** (self-play wins 0% -> 37% by 2.6M -> 95% by 5.5M,
+  plants 95%, beating bot defenders 20 to 30%). **Defenders never defused once (0%)** and their choices drifted back to
+  random (entropy 4.16 of 4.5): to defuse they must reach the spike and then stand still 7 steps in a row, which random
+  play almost never does, so they never saw a retake pay. **Fix: retake shaping.** The same potential, after the plant,
+  pulls defenders instead: plus the walking distance from the closest defender to the spike, minus the defuse
+  progress (attackers' view), so walking to the spike and building up a defuse pays a little, and walking away or
+  stepping off pays it back. Still potential-based and zero-sum. Both teams continue from the 5.5M-step checkpoint.
 
 ## v4: attack and defend (Valorant / CS style), with tags instead of guns
 
