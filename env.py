@@ -30,7 +30,8 @@
 #                                       the defenders' best defuse progress
 #   "minimap": (6, MINIMAP_SIZE, MINIMAP_SIZE)   walls, sites, me, teammates, where my team searched recently,
 #                                       where my team last saw or heard enemies (team callouts, fading)
-# rewards[team]: one number per player, shared by the team. Defenders always get minus the attackers (zero-sum).
+# rewards[team]: one number per player, shared by the team (defenders get minus the attackers: zero-sum), except a
+# small cost each player pays alone for walking into a wall (WALL_COST).
 #
 # Positions are (x, y) with y pointing down, 1 unit = 1 map cell (see geometry.py).
 
@@ -169,6 +170,7 @@ class GameEnv:
         self.alive = {team: np.ones(self.n[team], dtype=bool) for team in TEAMS}
         self.running = {team: np.zeros(self.n[team], dtype=bool) for team in TEAMS}
         self.noisy = {team: np.zeros(self.n[team], dtype=bool) for team in TEAMS}
+        self.bumped = {team: np.zeros(self.n[team], dtype=bool) for team in TEAMS}     # walked into a wall this step
         self.plant = {team: np.zeros(self.n[team], dtype=int) for team in TEAMS}      # steps planted in a row
         # watch[team][i, j]: how many steps in a row my player i has kept enemy j in its sights
         self.watch = {team: np.zeros((self.n[team], self.n[OTHER[team]]), dtype=int) for team in TEAMS}
@@ -208,11 +210,12 @@ class GameEnv:
         for team in TEAMS:
             acts = np.asarray(actions[team]).reshape(self.n[team], 3)
             self.noisy[team][:] = False
+            self.bumped[team][:] = False
             for i in range(self.n[team]):
                 if not self.alive[team][i] or (team == "attackers" and setup):
                     continue
-                self.pos[team][i], self.heading[team][i], self.running[team][i], self.noisy[team][i] = self._act(
-                    self.pos[team][i], self.heading[team][i], self.running[team][i], acts[i])
+                self.pos[team][i], self.heading[team][i], self.running[team][i], self.noisy[team][i], self.bumped[team][i] = \
+                    self._act(self.pos[team][i], self.heading[team][i], self.running[team][i], acts[i])
                 still = int(acts[i, 0]) == 0
                 if team == "attackers":
                     planting = self.spike is None and still and self.on_site(self.pos[team][i])
@@ -295,8 +298,9 @@ class GameEnv:
 
         self._update_memory()
         rewards = {
-            "attackers": np.full(self.n["attackers"], r, dtype=np.float32),
-            "defenders": np.full(self.n["defenders"], -r, dtype=np.float32),
+            # (the wall cost is each player's own, and is the one part that is not zero-sum)
+            "attackers": (r - cfg.WALL_COST * self.bumped["attackers"]).astype(np.float32),
+            "defenders": (-r - cfg.WALL_COST * self.bumped["defenders"]).astype(np.float32),
         }
         info = {
             "t": self.t,
@@ -306,6 +310,7 @@ class GameEnv:
             "planted_now": planted_now,
             "defused": self.winner == "defenders" and self.spike is not None,
             "outs": outs,
+            "bumped": {team: int(self.bumped[team].sum()) for team in TEAMS},
             "alive": {team: self.alive[team].copy() for team in TEAMS},
             "any_seen": bool(self.sees["attackers"].any() or self.sees["defenders"].any()),
         }
@@ -324,7 +329,9 @@ class GameEnv:
         dy = (fwd * np.sin(heading) + right * np.cos(heading)) * speed
         x, y = move_circle(self.walls, pos[0], pos[1], dx, dy, cfg.AGENT_RADIUS, cfg.MOVE_SUBSTEPS)
         noisy = run and move != 0
-        return np.array([x, y]), heading, run, noisy
+        # walked into a wall: tried to move but got less than half way
+        bumped = move != 0 and np.hypot(x - pos[0], y - pos[1]) < 0.5 * speed
+        return np.array([x, y]), heading, run, noisy, bumped
 
     def _potential(self):
         # attackers' shaping potential: minus the walking distance from the closest attacker still in to a site

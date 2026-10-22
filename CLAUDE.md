@@ -13,8 +13,12 @@ The exact rules of every game version are in `formulation.md`; this file is the 
   flip. This replaced the two-tag rule. (2) A balanced map: two sites, mirror symmetric, no spawn-to-spawn sightlines
   (the old mid corridor joined the spawns), mid reached through side doors. Spike 40 -> 50 steps for retakes.
 - Bots v bots on the new map: attackers 51%, planted 71%, defused 31%; takedowns 0.43 by attackers, 1.66 by defenders.
-- **v4.1 run started: 10M steps, both teams from scratch**, about 800 steps/s (about 3.5 hours), run name
-  `v4.1_two_sites_2v2_*`. The first v4 run (three sites, tags) was stopped at 300k steps (attackers had never planted).
+- Walking into a wall costs that player 0.02 (Moeez; the one non-zero-sum part; logged as `wall_bump_rate`).
+- **v4.1 run started: 30M steps, both teams from scratch** (Moeez: "let it run, but interrupt mid-way to fix anything
+  bad"), about 800 to 1,000 steps/s, so 8 to 10 hours; recordings every 5,000 games. Run name `v4.1_two_sites_2v2_*`.
+  Claude checks it about every 45 minutes (background timer) for: crashes, NaN or exploding KL, entropy collapsing
+  early, wall bumps not falling, a team stuck at 0% or 100% for a long time, plants never happening.
+  The first v4 run (three sites, tags) was stopped at 300k steps (attackers had never planted).
 - After the run: evaluate.py, GIFs (orange ring = being watched), and behaviour: which site attackers hit, do they go
   together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
 - Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.

@@ -86,7 +86,8 @@ with open(os.path.join(run_dir, "run_card.md"), "w") as f:
     f.write(f"- out after {cfg.WATCH_STEPS} steps in an enemy's sights (within {cfg.WATCH_ANGLE} degrees); "
             f"plant {cfg.PLANT_STEPS} steps, spike {cfg.SPIKE_STEPS}, defuse {cfg.DEFUSE_STEPS}\n")
     f.write(f"- rewards (attackers; defenders get minus): out {cfg.REWARD_OUT:+}, "
-            f"plant {cfg.REWARD_PLANT:+}, win {cfg.REWARD_WIN:+}, site shaping {cfg.SITE_SHAPING} (potential-based)\n")
+            f"plant {cfg.REWARD_PLANT:+}, win {cfg.REWARD_WIN:+}, site shaping {cfg.SITE_SHAPING} (potential-based); "
+            f"walking into a wall -{cfg.WALL_COST} (that player only)\n")
     f.write(f"- learning: {', '.join(cfg.TRAIN_TEAMS)}; memory: {', '.join(cfg.MEMORY_TEAMS)}; "
             f"bots play one team in {cfg.BOT_TEAM_PROB:.0%} of games; discount {cfg.GAMMA}\n")
     for team, path in cfg.START_FROM.items():
@@ -447,12 +448,13 @@ def ppo_update_sequences(team, b, adv, returns):
 recent = {k: deque(maxlen=cfg.WINRATE_WINDOW) for k in ["attacker_win", "planted", "defused", "length", "outs"]}
 recent_bot = {team: deque(maxlen=cfg.WINRATE_WINDOW) for team in TEAMS}   # trained team's win rate v the bots
 ep_outs = np.zeros(E)
+rollout_bumps, rollout_moves = 0, 0                  # walking into walls, for the wall_bump_rate column
 
 steps_done, games_done, update = 0, 0, 0
 next_record = 0
 csv_path = os.path.join(run_dir, "metrics.csv")
 csv_fields = ["update", "steps", "games", "attacker_win_rate", "plant_rate", "defuse_rate", "outs_per_round",
-              "avg_round_length", "attackers_win_vs_bots", "defenders_win_vs_bots", "attacker_entropy", "defender_entropy",
+              "avg_round_length", "attackers_win_vs_bots", "defenders_win_vs_bots", "wall_bump_rate", "attacker_entropy", "defender_entropy",
               "attacker_v_loss", "defender_v_loss", "attacker_kl", "defender_kl", "steps_per_sec"]
 with open(csv_path, "w", newline="") as f:
     csv.writer(f).writerow(csv_fields)
@@ -526,6 +528,8 @@ try:
                     buf[team]["reward"][t, e] = r[team]
                     buf[team]["done"][t, e] = (done | taken_out).astype(np.float32)
                 ep_outs[e] += sum(info["outs"].values())
+                rollout_bumps += sum(info["bumped"].values())
+                rollout_moves += sum(int(alive_before[team][e].sum()) for team in TEAMS)
 
                 if done:
                     games_done += 1
@@ -588,6 +592,7 @@ try:
                 "avg_round_length": mean(recent["length"]),
                 "attackers_win_vs_bots": mean(recent_bot["attackers"]),
                 "defenders_win_vs_bots": mean(recent_bot["defenders"]),
+                "wall_bump_rate": rollout_bumps / max(rollout_moves, 1),
                 "attacker_entropy": stats["attackers"].get("entropy", np.nan),
                 "defender_entropy": stats["defenders"].get("entropy", np.nan),
                 "attacker_v_loss": stats["attackers"].get("v_loss", np.nan),
@@ -598,10 +603,12 @@ try:
             }
             with open(csv_path, "a", newline="") as f:
                 csv.writer(f).writerow([row[k] for k in csv_fields])
+            rollout_bumps, rollout_moves = 0, 0
             print(f"update {update:4d} | steps {steps_done:>10,} | games {games_done:>6,} | "
                   f"attackers win {row['attacker_win_rate']:5.1%} (plant {row['plant_rate']:4.0%}, defuse {row['defuse_rate']:4.0%}) | "
                   f"outs {row['outs_per_round']:4.2f} | length {row['avg_round_length']:5.1f} | "
                   f"v bots: att {row['attackers_win_vs_bots']:4.0%} def {row['defenders_win_vs_bots']:4.0%} | "
+                  f"walls {row['wall_bump_rate']:4.1%} | "
                   f"entropy A {row['attacker_entropy']:.2f} D {row['defender_entropy']:.2f} | {sps:,.0f} steps/s")
 
         # ---------------- recording ----------------

@@ -100,6 +100,11 @@ for _ in range(3):
 check(f"walking into a wall stops exactly one radius short (x = {env.pos['defenders'][0, 0]:.4f})",
       close(env.pos["defenders"][0, 0], 6 - cfg.AGENT_RADIUS) and close(env.pos["defenders"][0, 1], 5.5))
 
+_, r, _, info, _ = act(env, dfn=[FORWARD, STAY])
+check(f"walking into a wall costs that player {cfg.WALL_COST}, and only that player",
+      env.bumped["defenders"][0] and close(r["defenders"][0] - r["defenders"][1], -cfg.WALL_COST)
+      and info["bumped"]["defenders"] == 1)
+
 place(env, att=[(11.5, 1.5, 0), (11.5, 2.5, 0)], dfn=[(8.5, 1.5, -45), (1.5, 1.5, 180)])
 act(env, dfn=[FORWARD, STAY])         # diagonally up-right into the top wall: should slide along it
 check(f"moving at an angle into a wall slides along it (x {env.pos['defenders'][0, 0]:.3f}, y {env.pos['defenders'][0, 1]:.3f})",
@@ -301,9 +306,9 @@ act(env, att=[[1, cfg.TURN_ANGLES.index(90), KEEP], STAY])
 act(env, att=[[1, NO_TURN, KEEP], STAY])
 check(f"site shaping: walking towards a site raises the attackers' potential ({old:.3f} -> {env.potential:.3f})",
       env.potential > old)
-_, r, _, _, _ = act(env, att=[[1, NO_TURN, KEEP], STAY])
-check(f"zero-sum, shaping included: attackers {r['attackers'][0]:+.4f}, defenders {r['defenders'][0]:+.4f}",
-      close(r["attackers"][0], -r["defenders"][0]))
+_, r, _, info, _ = act(env, att=[[0, cfg.TURN_ANGLES.index(90), KEEP], STAY])
+check(f"zero-sum when nobody walks into a wall, shaping included: attackers {r['attackers'][0]:+.4f}, "
+      f"defenders {r['defenders'][0]:+.4f}", not any(info["bumped"].values()) and close(r["attackers"][0], -r["defenders"][0]))
 
 # ======================================================================
 # observations and team information

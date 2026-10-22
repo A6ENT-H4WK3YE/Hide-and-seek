@@ -27,6 +27,10 @@ The current version: v4 (below) with two changes, both from Moeez's feedback on 
   planted 71%, defused 31%, takedowns per round 0.43 by attackers and 1.66 by defenders (holding an angle wins fights,
   attackers win through the objective).
 - The first v4 run (three sites, tags) was stopped at 300k steps after Moeez's feedback; attackers had never planted.
+- **Walking into walls costs 0.02** (Moeez): a player that tries to move but gets less than half way (blocked by a wall)
+  pays this alone; the other team does not gain it, so it is the one part of the rewards that is not zero-sum. Far too
+  small to change who wins (a round is worth 20), it only teaches clean movement. Logged as `wall_bump_rate` (random play
+  bumps on about 5% of moves).
 
 ## v4: attack and defend (Valorant / CS style), with tags instead of guns
 

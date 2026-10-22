@@ -72,6 +72,9 @@ REWARD_OUT = 10.0       # each enemy taken out
 REWARD_PLANT = 5.0      # the spike goes down (a real milestone of the round, like a tag)
 REWARD_WIN = 20.0       # round won (spike explodes or every defender out; for defenders: defuse, every attacker out
                         # before the plant, or time runs out before the plant)
+WALL_COST = 0.02        # a player that tries to move but is mostly blocked by a wall (moves less than half the way) pays
+                        # this, alone: the other team does not gain it, so it is the one part that is not zero-sum.
+                        # Teaches clean movement; far too small to matter next to a round (20)
 SITE_SHAPING = 1.0      # potential-based shaping for attackers: potential = -SITE_SHAPING x (walking distance from the
                         # closest attacker to a site / longest such distance on the map). The reward is
                         # GAMMA x new potential - old potential: going towards a site pays a little, walking away pays
@@ -92,7 +95,7 @@ SWITCH_KEEP_PROB = 0.95 # an untrained network presses "keep" this often (switch
 
 # ---------- training (PPO self-play) ----------
 SEED = 42
-TOTAL_STEPS = 10_000_000  # total environment steps across all parallel games (a new game, learnt from scratch)
+TOTAL_STEPS = 30_000_000  # total environment steps across all parallel games (a long run, from scratch)
 N_ENVS = 16             # games played in parallel (one network call covers all of them)
 ROLLOUT_STEPS = 128     # steps per game collected before each update (16 x 128 = 2048 per update)
 LEARNING_RATE = 3e-4
@@ -129,5 +132,5 @@ BOT_EVAL_GAMES = 100    # games per bot matchup at every recording (0 switches i
 
 # ---------- logging ----------
 RUN_DIR = "runs"
-RECORD_EVERY = 2_000    # save a GIF + checkpoint every this many finished games
+RECORD_EVERY = 5_000    # save a GIF + checkpoint every this many finished games (each costs about half a minute)
 WINRATE_WINDOW = 200    # win rate is averaged over the last this many games
