@@ -29,6 +29,10 @@ The exact rules of every game version are in `formulation.md`; this file is the 
   together, do defenders hold angles / stack / rotate on sound, do retakes happen, walk / run use.
 - Ideas for later: bigger teams towards 5v5; continuous turning; teammate communication; sharper minimap.
 - **Always start runs with `caffeinate -i`, smoke runs and evaluations too.** Use `python -u` so progress shows.
+- **Runs that seem to stall are the Mac sleeping.** On battery, closing the lid sleeps the Mac even with caffeinate (the
+  power log says "Clamshell Sleep"): the 30M run on 2026-10-22 was frozen from 10:56 to 12:51 that way, and an earlier
+  smoke run lost 15 minutes. Check with `pmset -g log | grep -E "Entering Sleep|Wake from"`. Long runs need the
+  charger in and the lid open (screen off or locked is fine).
 
 ## v4 design summary (2026-10-22, details and reasons in formulation.md)
 
